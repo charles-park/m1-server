@@ -19,6 +19,11 @@ overlays="i2c0 i2c1"
 [overlay_hktft32]
 overlays="hktft32 ads7846"
 ```
+* add root user, ssh root enable (https://www.leafcats.com/176)
+```
+root@odroid:~# passwd root
+```
+
 ### Install package
 * vim, build-essentail, git, wiringPi, python3, samba, ssh, nmap, iperf3 (in install folder)
 
