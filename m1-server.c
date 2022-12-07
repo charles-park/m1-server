@@ -27,6 +27,10 @@
 #include <linux/fb.h>
 #include <getopt.h>
 
+//------------------------------------------------------------------------------
+// git submodule header include
+//------------------------------------------------------------------------------
+#include "storage_test/storage_test.h"
 #include "lib_fbui/lib_fb.h"
 #include "lib_fbui/lib_ui.h"
 
@@ -36,6 +40,11 @@ const char *OPT_DEVICE_NAME = "/dev/fb0";
 const char *OPT_FBUI_CFG = "fbui.cfg";
 
 //------------------------------------------------------------------------------
+#define	DEV_SPEED_EMMC	150
+#define	DEV_SPEED_SDMMC	50
+#define	DEV_SPEED_NVME	1000
+#define	DEV_SPEED_SATA	500
+
 //------------------------------------------------------------------------------
 int main(int argc, char **argv)
 {
@@ -53,6 +62,21 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 	ui_update(pfb, ui_grp, -1);
+
+	ui_set_ritem (pfb, ui_grp, 47, COLOR_GRAY, -1);
+	{
+		char resp_str[32];
+		int speed;
+		speed = storage_test ("emmc", resp_str);
+		ui_set_sitem (pfb, ui_grp, 62, -1, -1, resp_str);
+		ui_set_ritem (pfb, ui_grp, 62, speed > DEV_SPEED_EMMC ? COLOR_GREEN : COLOR_RED, -1);
+		speed = storage_test ("sata", resp_str);
+		ui_set_sitem (pfb, ui_grp, 82, -1, -1, resp_str);
+		ui_set_ritem (pfb, ui_grp, 82, speed > DEV_SPEED_SATA ? COLOR_GREEN : COLOR_RED, -1);
+		speed = storage_test ("nvme", resp_str);
+		ui_set_sitem (pfb, ui_grp, 87, -1, -1, resp_str);
+		ui_set_ritem (pfb, ui_grp, 87, speed > DEV_SPEED_NVME ? COLOR_GREEN : COLOR_RED, -1);
+	}
 
 	ui_close(ui_grp);
 	fb_close (pfb);
