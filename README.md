@@ -3,8 +3,12 @@ ODROID-M1 stand-alone jig app
 ### Image used for testing.
 * https://dn.odroid.com/RK3568/ODROID-M1/Ubuntu/ubuntu-20.04-server-odroidm1-20220531.img.xz
 * Add overlay "uart0" and remove "spi0" to config.ini file.
+* Add resolution and refresh values for using vu7 hdmi display.
 ```
 [generic]
+resolution=1920x1080
+refresh=60
+
 overlay_resize=16384
 overlay_profile=
 overlays="uart0 i2c0 i2c1"
