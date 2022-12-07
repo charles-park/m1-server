@@ -1,5 +1,28 @@
 # m1-server
 ODROID-M1 stand-alone jig app
+### Image used for testing.
+* https://dn.odroid.com/RK3568/ODROID-M1/Ubuntu/ubuntu-20.04-server-odroidm1-20220531.img.xz
+* Add overlay "uart0" and remove "spi0" to config.ini file.
+```
+[generic]
+overlay_resize=16384
+overlay_profile=
+overlays="uart0 i2c0 i2c1"
+
+[overlay_custom]
+overlays="i2c0 i2c1"
+
+[overlay_hktft32]
+overlays="hktft32 ads7846"
+```
+### Install package
+* vim, build-essentail, git, wiringPi, python3, samba, ssh
+
+### Clone repository for Header40 port testing
+* for header40 testing.
+```
+root@odroid:~# git clone https://github.com/charles-park/header40
+```
 
 ### Use the lib_fbui submodule.
 * Add the lib fbui submodule to the m1-server repository.
@@ -32,6 +55,7 @@ To https://github.com/charles-park/m1-server
 root@odroid:~/m1-server# 
 
 ```
+
 * Clone the reopsitory with submodule.
 ```
 root@odroid:~# git clone --recursive https://github.com/charles-park/m1-server
