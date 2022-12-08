@@ -47,6 +47,7 @@ const char *OPT_FBUI_CFG = "fbui.cfg";
 #define	DEV_SPEED_NVME	1000
 #define	DEV_SPEED_SATA	500
 
+#define	IPERF_SPEED		800
 //------------------------------------------------------------------------------
 int system_memory (void)
 {
@@ -73,7 +74,7 @@ char NlpServerIP[20] = {0,};
 void bootup_test (fb_info_t *pfb, ui_grp_t *ui_grp)
 {
 	char resp_str[32];
-	int speed;
+	int speed, retry;
 
 	/* system state display "wait" */
 	ui_set_ritem (pfb, ui_grp, 47, COLOR_GRAY, -1);
@@ -91,28 +92,45 @@ void bootup_test (fb_info_t *pfb, ui_grp_t *ui_grp)
 		}
 	}
 
-	memset (resp_str, 0, sizeof(resp_str));
-	sprintf (resp_str, "%d x %d", pfb->w, pfb->h);
-	ui_set_sitem (pfb, ui_grp, 42, -1, -1, resp_str);
-	if ((pfb->w != 1920) || (pfb->h != 1080))
-		ui_set_ritem (pfb, ui_grp, 42, COLOR_RED, -1);
-	else
-		ui_set_ritem (pfb, ui_grp, 42, COLOR_GREEN, -1);
+	{
+		memset (resp_str, 0, sizeof(resp_str));
+		sprintf (resp_str, "%d x %d", pfb->w, pfb->h);
+		ui_set_sitem (pfb, ui_grp, 42, -1, -1, resp_str);
+		if ((pfb->w != 1920) || (pfb->h != 1080))
+			ui_set_ritem (pfb, ui_grp, 42, COLOR_RED, -1);
+		else
+			ui_set_ritem (pfb, ui_grp, 42, COLOR_GREEN, -1);
+	}
 
-	memset (resp_str, 0, sizeof(resp_str));
-	speed = storage_test ("emmc", resp_str);
-	ui_set_sitem (pfb, ui_grp, 62, -1, -1, resp_str);
-	ui_set_ritem (pfb, ui_grp, 62, speed > DEV_SPEED_EMMC ? COLOR_GREEN : COLOR_RED, -1);
+	{
+		memset (resp_str, 0, sizeof(resp_str));
+		speed = 0;	retry = 3;
+		while ((retry--) && (speed < DEV_SPEED_EMMC)) {
+			speed = storage_test ("emmc", resp_str);
+		}
+		ui_set_sitem (pfb, ui_grp, 62, -1, -1, resp_str);
+		ui_set_ritem (pfb, ui_grp, 62, speed > DEV_SPEED_EMMC ? COLOR_GREEN : COLOR_RED, -1);
+	}
 
-	memset (resp_str, 0, sizeof(resp_str));
-	speed = storage_test ("sata", resp_str);
-	ui_set_sitem (pfb, ui_grp, 82, -1, -1, resp_str);
-	ui_set_ritem (pfb, ui_grp, 82, speed > DEV_SPEED_SATA ? COLOR_GREEN : COLOR_RED, -1);
+	{
+		memset (resp_str, 0, sizeof(resp_str));
+		speed = 0;	retry = 3;
+		while ((retry--) && (speed < DEV_SPEED_SATA)) {
+			speed = storage_test ("sata", resp_str);
+		}
+		ui_set_sitem (pfb, ui_grp, 82, -1, -1, resp_str);
+		ui_set_ritem (pfb, ui_grp, 82, speed > DEV_SPEED_SATA ? COLOR_GREEN : COLOR_RED, -1);
+	}
 
-	memset (resp_str, 0, sizeof(resp_str));
-	speed = storage_test ("nvme", resp_str);
-	ui_set_sitem (pfb, ui_grp, 87, -1, -1, resp_str);
-	ui_set_ritem (pfb, ui_grp, 87, speed > DEV_SPEED_NVME ? COLOR_GREEN : COLOR_RED, -1);
+	{
+		memset (resp_str, 0, sizeof(resp_str));
+		speed = 0;	retry = 3;
+		while ((retry--) && (speed < DEV_SPEED_NVME)) {
+			speed = storage_test ("nvme", resp_str);
+		}
+		ui_set_sitem (pfb, ui_grp, 87, -1, -1, resp_str);
+		ui_set_ritem (pfb, ui_grp, 87, speed > DEV_SPEED_NVME ? COLOR_GREEN : COLOR_RED, -1);
+	}
 
 	memset (BoardIP, 0, sizeof(BoardIP));
 	memset (NlpServerIP, 0, sizeof(NlpServerIP));
@@ -122,14 +140,15 @@ void bootup_test (fb_info_t *pfb, ui_grp_t *ui_grp)
 		ui_set_ritem (pfb, ui_grp, 4, COLOR_GREEN, -1);
 	}
 	if (nlp_server_find (NlpServerIP)) {
-		int speed = 0, retry = 5;
 
 		ui_set_sitem (pfb, ui_grp, 24, -1, -1, NlpServerIP);
 		ui_set_ritem (pfb, ui_grp, 24, COLOR_GREEN, -1);
 		// UDP = 3, TCP = 4
 		nlp_server_write   (NlpServerIP, 3, "start", 0);
 		sleep(1);
-		while ((retry--) && (speed < 800)) {
+
+		speed = 0;	retry = 3;
+		while ((retry--) && (speed < IPERF_SPEED)) {
 			speed = iperf3_speed_check (NlpServerIP, 3);
 		}
 		sleep(1);
@@ -138,7 +157,18 @@ void bootup_test (fb_info_t *pfb, ui_grp_t *ui_grp)
 		memset (resp_str, 0, sizeof(resp_str));
 		sprintf (resp_str, "%d MBits/sec", speed);
 		ui_set_sitem (pfb, ui_grp, 147, -1, -1, resp_str);
-		ui_set_ritem (pfb, ui_grp, 147, (retry != 0) ? COLOR_GREEN : COLOR_RED, -1);
+		ui_set_ritem (pfb, ui_grp, 147, (speed > IPERF_SPEED) ? COLOR_GREEN : COLOR_RED, -1);
+	}
+
+	{
+		char mac_str[20] = {0,};
+
+		memset (mac_str, 0, sizeof(mac_str));
+//#define MSG_TYPE_MAC	1
+//#define MSG_TYPE_ERR	2
+		if (get_my_mac (mac_str)) {
+			nlp_server_write (NlpServerIP, 1, mac_str, 0);
+		}
 	}
 }
 
