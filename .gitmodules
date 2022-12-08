@@ -4,6 +4,3 @@
 [submodule "storage_test"]
 	path = storage_test
 	url = https://github.com/charles-park/storage_test.jig
-[submodule "nlp_server_ctrl"]
-	path = nlp_server_ctrl
-	url = https://github.com/charles-park/nlp_server_ctrl
