@@ -7,3 +7,6 @@
 [submodule "nlp_server_ctrl"]
 	path = nlp_server_ctrl
 	url = https://github.com/charles-park/nlp_server_ctrl
+[submodule "mac_server_ctrl"]
+	path = mac_server_ctrl
+	url = https://github.com/charles-park/mac_server_ctrl
