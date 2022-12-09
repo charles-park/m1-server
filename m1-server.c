@@ -31,6 +31,7 @@
 //------------------------------------------------------------------------------
 // git submodule header include
 //------------------------------------------------------------------------------
+#include "mac_server_ctrl/mac_server_ctrl.h"
 #include "nlp_server_ctrl/nlp_server_ctrl.h"
 #include "storage_test/storage_test.h"
 #include "lib_fbui/lib_fb.h"
@@ -164,10 +165,33 @@ void bootup_test (fb_info_t *pfb, ui_grp_t *ui_grp)
 		char mac_str[20] = {0,};
 
 		memset (mac_str, 0, sizeof(mac_str));
-//#define MSG_TYPE_MAC	1
-//#define MSG_TYPE_ERR	2
-		if (get_my_mac (mac_str)) {
+		if (!get_my_mac (mac_str)) {
+			char uuid[MAC_SERVER_CTRL_TYPE_UUID_SIZE+1];
+			memset (uuid, 0, sizeof(uuid));
+			if (get_mac_uuid ("m1", MAC_SERVER_CTRL_TYPE_UUID, uuid, MAC_SERVER_CTRL_DEV_SERVER)) {
+				// write efuse...compare uuid in efuse...
+
+				// uuid return : c56d8ba1-14c8-408d-90f0-001e06510029
+				memset (mac_str, 0, sizeof(mac_str));
+				strncpy (mac_str, &uuid[24], 12);
+			}
+		}
+
+		printf ("mac str = %s\n", mac_str);
+
+		if (!strncmp (mac_str, "001e06", strlen("001e06"))) {
+			memset (resp_str, 0, sizeof(resp_str));
+			sprintf (resp_str,"00:1e:06:%c%c:%c%c:%c%c",
+				mac_str[6],	mac_str[7],	mac_str[8],	mac_str[9],	mac_str[10], mac_str[11]);
+			ui_set_sitem (pfb, ui_grp, 167, -1, -1, resp_str);
+			ui_set_ritem (pfb, ui_grp, 167, COLOR_GREEN, -1);
+	//#define MSG_TYPE_MAC	1
+	//#define MSG_TYPE_ERR	2
+			/* mac address print */
 			nlp_server_write (NlpServerIP, 1, mac_str, 0);
+		} else {
+			ui_set_sitem (pfb, ui_grp, 167, -1, -1, "unknown mac");
+			ui_set_ritem (pfb, ui_grp, 167, COLOR_RED, -1);
 		}
 	}
 }
