@@ -195,6 +195,11 @@ void bootup_test (fb_info_t *pfb, ui_grp_t *ui_grp)
 		}
 	}
 }
+#if 0
+// change eth speed -> ethtool used
+async def set_eth_mode(speed):
+    cmd = f"echo odroid | sudo -S ethtool -s eth0 speed {speed} duplex full"
+#endif
 
 //------------------------------------------------------------------------------
 int main(int argc, char **argv)
