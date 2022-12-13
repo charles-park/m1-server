@@ -82,8 +82,6 @@ class ODROID_M1:
             print("E: {0}".format(err))
             return False
 
-        print('I: success - {}'.format(data))
-
         return True
 
 

@@ -28,10 +28,16 @@ if __name__ == "__main__":
 
     if args[1] == '-w':
         success = board.provision(args[2], int(args[3]))
+        if success:
+            print('efuse write success')
     elif args[1] == '-d':
         success = board.dump()
+        if success:
+            print('Check the response to the efuse read command with the dmesg command.')
     elif args[1] == '-e':
-        success = board.clear(args[2], int(args[3]))
+        success = board.clear(int(args[2]))
+        if success:
+            print('efuse erase success')
     else :
         quit()
 
