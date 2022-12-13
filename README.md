@@ -25,7 +25,8 @@ root@odroid:~# passwd root
 ```
 
 ### Install package
-* vim, build-essentail, git, wiringPi, python3, samba, ssh, nmap, iperf3 (in install folder)
+* vim, build-essentail, git, wiringPi, python3, python3-pip,samba, ssh, nmap, usbutils, evtest, iperf3 (in install folder)
+* python3 -m pip install aiohttp asyncio
 
 ### Clone repository for Header40 port testing
 * for header40 testing.
