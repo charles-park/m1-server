@@ -117,7 +117,7 @@ root@odroid:~# cd m1-server
 root@odroid:~/m1-server# git submodule init
 root@odroid:~/m1-server# git submodule update
 ```
-=== Overlay root
+### Overlay root
 * overlay-root enable
 ```
 root@odroid:~# update-initramfs -c -k $(uname -r)
