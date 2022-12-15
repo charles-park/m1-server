@@ -58,6 +58,30 @@ enum {
 char BoardIP    [20] = {0,};
 char NlpServerIP[20] = {0,};
 char MacStr     [20] = {0,};
+char EmergencyStop = 0;
+
+#define	ERR_IPERF_SPEED		(1<<0)
+#define	ERR_EFUSE_UUIDD		(1<<1)
+#define	ERR_BOARD_MEM		(1<<2)
+#define	ERR_FB_SIZE			(1<<3)
+#define	ERR_EMMC_SPEED		(1<<4)
+#define	ERR_SATA_SPEED		(1<<5)
+#define	ERR_NVME_SPEED		(1<<6)
+#define	ERR_USB30_UP		(1<<7)
+#define	ERR_USB30_DN		(1<<8)
+#define	ERR_USB20_UP		(1<<9)
+#define	ERR_USB20_DN		(1<<10)
+#define	ERR_ETH_GREEN		(1<<11)
+#define	ERR_ETH_ORANGE		(1<<12)
+#define	ERR_HP_IN			(1<<13)
+#define	ERR_HP_OUT			(1<<14)
+#define	ERR_SPIBT_DN		(1<<15)
+#define	ERR_SPIBT_UP		(1<<16)
+#define	ERR_IR_INPUT		(1<<17)
+#define	ERR_GET_MACADDR		(1<<18)
+
+/* default test result error */
+unsigned int ErrorBits = 0x7FFFF;
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
@@ -101,6 +125,7 @@ const char *OPT_FBUI_CFG = "fbui.cfg";
 //------------------------------------------------------------------------------
 int		system_memory		(void);
 int		macaddr_print		(void);
+int 	errcode_print		(void);
 int		get_efuse_mac		(char *mac_str);
 int		write_efuse			(char *uuid);
 int		change_eth_speed	(int speed);
@@ -144,6 +169,51 @@ int macaddr_print (void)
 {
 	/* mac address print */
 	return nlp_server_write (NlpServerIP, NLP_SERVER_MSG_TYPE_MAC, MacStr, 0);
+}
+
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+#define PRINT_MAX_STR	50
+int errcode_print (void)
+{
+	char err_msg[80];
+	int pos = 0;;
+
+	if (!ErrorBits)
+		return	1;
+	memset (err_msg, 0, sizeof(err_msg));
+	if (ErrorBits & ERR_IPERF_SPEED)	pos += sprintf(&err_msg[pos], "%s,", "IPERF");
+	if (ErrorBits & ERR_EFUSE_UUIDD)	pos += sprintf(&err_msg[pos], "%s,", "EFUSE");
+	if (ErrorBits & ERR_BOARD_MEM)		pos += sprintf(&err_msg[pos], "%s,", "MEM");
+	if (ErrorBits & ERR_FB_SIZE)		pos += sprintf(&err_msg[pos], "%s,", "HDMI");
+	if (ErrorBits & ERR_EMMC_SPEED)		pos += sprintf(&err_msg[pos], "%s,", "EMMC");
+	if (ErrorBits & ERR_SATA_SPEED)		pos += sprintf(&err_msg[pos], "%s,", "SATA");
+	if (ErrorBits & ERR_NVME_SPEED)		pos += sprintf(&err_msg[pos], "%s,", "NVME");
+	if (ErrorBits & ERR_USB30_UP)		pos += sprintf(&err_msg[pos], "%s,", "USB3U");
+	if (ErrorBits & ERR_USB30_DN)		pos += sprintf(&err_msg[pos], "%s,", "USB3D");
+	if (ErrorBits & ERR_USB20_UP)		pos += sprintf(&err_msg[pos], "%s,", "USB2U");
+	if (ErrorBits & ERR_USB20_DN)		pos += sprintf(&err_msg[pos], "%s,", "USB2D");
+	if (ErrorBits & ERR_ETH_GREEN)		pos += sprintf(&err_msg[pos], "%s,", "ETH_G");
+	if (ErrorBits & ERR_ETH_ORANGE)		pos += sprintf(&err_msg[pos], "%s,", "ETH_O");
+	if (ErrorBits & ERR_HP_IN)			pos += sprintf(&err_msg[pos], "%s,", "HP_I");
+	if (ErrorBits & ERR_HP_OUT)			pos += sprintf(&err_msg[pos], "%s,", "HP_O");
+	if (ErrorBits & ERR_SPIBT_DN)		pos += sprintf(&err_msg[pos], "%s,", "BT_DN");
+	if (ErrorBits & ERR_SPIBT_UP)		pos += sprintf(&err_msg[pos], "%s,", "BT_UP");
+	if (ErrorBits & ERR_IR_INPUT)		pos += sprintf(&err_msg[pos], "%s,", "IR_IN");
+	if (ErrorBits & ERR_GET_MACADDR)	pos += sprintf(&err_msg[pos], "%s,", "MACADDR");
+
+	printf ("ErrorBits = 0x%08X, err msg = %s\n", ErrorBits, err_msg);
+	if (pos > PRINT_MAX_STR) {
+		int i = PRINT_MAX_STR;
+		while ((err_msg[i] != ',') && ((int)strlen(err_msg) < i))	i++;
+		nlp_server_write (NlpServerIP, NLP_SERVER_MSG_TYPE_ERR, &err_msg[i+1], 0);
+		printf ("ErrorBits = 0x%08X, err msg = %s\n", ErrorBits, &err_msg[i+1]);
+		err_msg[i+1] = 0;
+	}
+
+	printf ("ErrorBits = 0x%08X, err msg = %s\n", ErrorBits, err_msg);
+	return nlp_server_write (NlpServerIP, NLP_SERVER_MSG_TYPE_ERR, err_msg, 0);
 }
 
 //------------------------------------------------------------------------------
@@ -392,6 +462,7 @@ int test_efuse_uuid (fb_info_t *pfb, ui_grp_t *ui_grp)
 			MacStr[6],	MacStr[7],	MacStr[8],	MacStr[9],	MacStr[10], MacStr[11]);
 		ui_set_sitem (pfb, ui_grp, 167, -1, -1, resp_str);
 		ui_set_ritem (pfb, ui_grp, 167, COLOR_GREEN, -1);
+		ErrorBits &= (~ERR_GET_MACADDR);
 		return 1;
 	} else {
 		ui_set_sitem (pfb, ui_grp, 167, -1, -1, "unknown mac");
@@ -403,7 +474,7 @@ int test_efuse_uuid (fb_info_t *pfb, ui_grp_t *ui_grp)
 //------------------------------------------------------------------------------
 int bootup_test (fb_info_t *pfb, ui_grp_t *ui_grp)
 {
-	int err = 0, ret, retry;
+	int retry;
 
 	memset (BoardIP, 0, sizeof(BoardIP));
 	memset (NlpServerIP, 0, sizeof(NlpServerIP));
@@ -413,44 +484,39 @@ int bootup_test (fb_info_t *pfb, ui_grp_t *ui_grp)
 	ui_set_sitem (pfb, ui_grp, 47, -1, -1, "WAIT");
 	ui_set_ritem (pfb, ui_grp, 47, COLOR_GRAY, -1);
 
-	retry = TEST_RETRY_COUNT;
-	while (((ret = get_my_ip (BoardIP)) == 0) && (retry--))
-		sleep(1);
+	/* default network speed GBits/sec */
+	change_eth_speed (1000);
 
-	if (ret) {
-		ui_set_sitem (pfb, ui_grp, 4, -1, -1, BoardIP);
-		ui_set_ritem (pfb, ui_grp, 4, COLOR_GREEN, -1);
-	} else {
+	while (!get_my_ip (BoardIP)) {
 		memset (BoardIP, 0, sizeof(BoardIP));
 		sprintf(BoardIP, "%s", "Network Error!");
 		ui_set_sitem (pfb, ui_grp, 4, -1, -1, BoardIP);
-		ui_set_ritem (pfb, ui_grp, 4, COLOR_RED, -1);
-		while (1)	sleep(1);
-	}
-
-	retry = TEST_RETRY_COUNT;
-	while (((ret = nlp_server_find (NlpServerIP)) == 0) && (retry--))
+		ui_set_ritem (pfb, ui_grp, 4, (retry++ % 2)
+			? COLOR_RED : COLOR_DIM_GRAY, -1);
 		sleep(1);
+	}
+	ui_set_sitem (pfb, ui_grp, 4, -1, -1, BoardIP);
+	ui_set_ritem (pfb, ui_grp, 4, COLOR_GREEN, -1);
 
-	if (ret) {
-		ui_set_sitem (pfb, ui_grp, 24, -1, -1, NlpServerIP);
-		ui_set_ritem (pfb, ui_grp, 24, COLOR_GREEN, -1);
-		err += test_iperf_speed (pfb, ui_grp) ? 0 : 1;
-	} else {
+	while (!nlp_server_find (NlpServerIP)) {
 		memset (NlpServerIP, 0, sizeof(NlpServerIP));
 		sprintf(NlpServerIP, "%s", "Network Error!");
 		ui_set_sitem (pfb, ui_grp, 24, -1, -1, NlpServerIP);
-		ui_set_ritem (pfb, ui_grp, 24, COLOR_RED, -1);
-		while (1)	sleep(1);
+		ui_set_ritem (pfb, ui_grp, 24, (retry++ % 2)
+			? COLOR_RED : COLOR_DIM_GRAY, -1);
+		sleep(1);
 	}
+	ui_set_sitem (pfb, ui_grp, 24, -1, -1, NlpServerIP);
+	ui_set_ritem (pfb, ui_grp, 24, COLOR_GREEN, -1);
 
-	err += test_efuse_uuid (pfb, ui_grp) ? 0 : 1;
-	err += test_board_mem  (pfb, ui_grp) ? 0 : 1;
-	err += test_fb_size    (pfb, ui_grp) ? 0 : 1;
-	err += test_emmc_speed (pfb, ui_grp) ? 0 : 1;
-	err += test_sata_speed (pfb, ui_grp) ? 0 : 1;
-	err += test_nvme_speed (pfb, ui_grp) ? 0 : 1;
-	return err;
+	if (test_iperf_speed(pfb, ui_grp))	ErrorBits &= (~ERR_IPERF_SPEED);
+	if (test_efuse_uuid (pfb, ui_grp))	ErrorBits &= (~ERR_EFUSE_UUIDD);
+	if (test_board_mem  (pfb, ui_grp))	ErrorBits &= (~ERR_BOARD_MEM);
+	if (test_fb_size    (pfb, ui_grp))	ErrorBits &= (~ERR_FB_SIZE);
+	if (test_emmc_speed (pfb, ui_grp))	ErrorBits &= (~ERR_EMMC_SPEED);
+	if (test_sata_speed (pfb, ui_grp))	ErrorBits &= (~ERR_SATA_SPEED);
+	if (test_nvme_speed (pfb, ui_grp))	ErrorBits &= (~ERR_NVME_SPEED);
+	return ErrorBits;
 }
 
 //------------------------------------------------------------------------------
@@ -545,6 +611,7 @@ int test_usb_speed (fb_info_t *pfb, ui_grp_t *ui_grp)
 							speed = storage_read_test (fname, usb_det_speed > 480 ? 5 : 1);
 						usb30_up = (speed > USB30_MASS_SPEED) ? 1 : 0;
 						usb_pass = usb30_up;
+						if (usb30_up)	ErrorBits &= (~ERR_USB30_UP);
 					break;
 					case 2:	case 3:
 						ui_id = 122;
@@ -553,6 +620,7 @@ int test_usb_speed (fb_info_t *pfb, ui_grp_t *ui_grp)
 							speed = storage_read_test (fname, usb_det_speed > 480 ? 5 : 1);
 						usb30_dn = (speed > USB30_MASS_SPEED) ? 1 : 0;
 						usb_pass = usb30_dn;
+						if (usb30_dn)	ErrorBits &= (~ERR_USB30_DN);
 					break;
 					case 4:	case 5:
 						ui_id = 107;
@@ -561,6 +629,7 @@ int test_usb_speed (fb_info_t *pfb, ui_grp_t *ui_grp)
 							speed = storage_read_test (fname, usb_det_speed > 12 ? 5 : 1);
 						usb20_up = (speed > USB20_MASS_SPEED) ? 1 : 0;
 						usb_pass = usb20_up;
+						if (usb20_up)	ErrorBits &= (~ERR_USB20_UP);
 					break;
 					case 6:	case 7:
 						ui_id = 127;
@@ -569,6 +638,7 @@ int test_usb_speed (fb_info_t *pfb, ui_grp_t *ui_grp)
 							speed = storage_read_test (fname, usb_det_speed > 12 ? 5 : 1);
 						usb20_dn = (speed > USB20_MASS_SPEED) ? 1 : 0;
 						usb_pass = usb20_dn;
+						if (usb20_dn)	ErrorBits &= (~ERR_USB20_DN);
 					break;
 					default :
 					break;
@@ -598,7 +668,7 @@ int test_usb_speed (fb_info_t *pfb, ui_grp_t *ui_grp)
 int change_eth_speed (int speed)
 {
 	FILE *fp;
-	char cmd_line[128];
+	char cmd_line[128], retry = TEST_RETRY_COUNT;
 
 	if (access ("/sys/class/net/eth0/speed", F_OK) != 0)
 		return 0;
@@ -619,18 +689,21 @@ int change_eth_speed (int speed)
 	if ((fp = popen(cmd_line, "w")) != NULL)
 		pclose(fp);
 
-	sleep(3);
-	if ((fp = fopen ("/sys/class/net/eth0/speed", "r")) != NULL) {
-		memset (cmd_line, 0x00, sizeof(cmd_line));
-		if (NULL != fgets (cmd_line, sizeof(cmd_line), fp)) {
-			fprintf (stderr, "%s : change speed = %d, read speed = %d\n",
-					__func__, speed, atoi(cmd_line));
-			if (speed == atoi(cmd_line)) {
-				fclose (fp);
-				return 1;
+	while (retry) {
+		if ((fp = fopen ("/sys/class/net/eth0/speed", "r")) != NULL) {
+			memset (cmd_line, 0x00, sizeof(cmd_line));
+			if (NULL != fgets (cmd_line, sizeof(cmd_line), fp)) {
+				if (speed == atoi(cmd_line)) {
+					fclose (fp);
+					return 1;
+				}
+				retry--;
+				fprintf (stderr, "%s : change speed = %d, read speed = %d, retry remain = %d\n",
+						__func__, speed, atoi(cmd_line), retry);
 			}
+			fclose (fp);
 		}
-		fclose (fp);
+		sleep (1);
 	}
 	return 0;
 }
@@ -647,10 +720,6 @@ int test_ir_ethled (fb_info_t *pfb, ui_grp_t *ui_grp)
 
 	struct timeval  timeout;
 	fd_set readFds;
-
-	/* Test complete */
-	if (!led_orange && !led_green)
-		return 1;
 
 	// recive time out config
 	// Set 1ms timeout counter
@@ -675,7 +744,11 @@ int test_ir_ethled (fb_info_t *pfb, ui_grp_t *ui_grp)
 					break;
 				case	EV_KEY:
 					switch (event.code) {
-						case	KEY_ENTER:	case	KEY_HOME:	case	KEY_UP:
+						/* emergency stop */
+						case	KEY_HOME:
+							EmergencyStop = 1;
+						break;
+						case	KEY_ENTER:	case	KEY_UP:
 						case	KEY_LEFT:	case	KEY_RIGHT:	case	KEY_DOWN:
 						case	KEY_MUTE:	case	KEY_MENU:	case	KEY_BACK:
 						case	KEY_VOLUMEDOWN:		case	KEY_VOLUMEUP:
@@ -685,19 +758,24 @@ int test_ir_ethled (fb_info_t *pfb, ui_grp_t *ui_grp)
 							if ((event.code == KEY_VOLUMEDOWN) && event.value && led_green) {
 								led_green = 0;
 								ui_set_ritem (pfb, ui_grp, 162, COLOR_YELLOW, -1);
-								if ((changed = change_eth_speed (100)) != -1)
+								if ((changed = change_eth_speed (100)) != -1) {
 									ui_set_ritem (pfb, ui_grp, 162,
 												changed ? COLOR_GREEN : COLOR_RED, -1);
+									if (changed)	ErrorBits &= (~ERR_ETH_GREEN);
+								}
 							}
 							if ((event.code == KEY_VOLUMEUP) && event.value && led_orange && !led_green) {
 								led_orange = 0;
 								ui_set_ritem (pfb, ui_grp, 163, COLOR_YELLOW, -1);
-								if ((changed = change_eth_speed (1000)) != -1)
+								if ((changed = change_eth_speed (1000)) != -1) {
 									ui_set_ritem (pfb, ui_grp, 163,
 												changed ? COLOR_GREEN : COLOR_RED, -1);
+									if (changed)	ErrorBits &= (~ERR_ETH_ORANGE);
+								}
 							}
 							ui_set_sitem (pfb, ui_grp, 142,	-1, -1, "PASS");
 							ui_set_ritem (pfb, ui_grp, 142,	COLOR_GREEN, -1);
+							ErrorBits &= (~ERR_IR_INPUT);
 						break;
 						default :
 							printf("unknown event\n");
@@ -709,6 +787,10 @@ int test_ir_ethled (fb_info_t *pfb, ui_grp_t *ui_grp)
 			}
 		}
     }
+	/* Test complete */
+	if (!led_orange && !led_green)
+		return 1;
+
 	return -1;
 }
 
@@ -753,10 +835,12 @@ int test_hp_detect (fb_info_t *pfb, ui_grp_t *ui_grp)
 							if ((event.value == 0) && jack_remove) {
 								jack_remove = 0;
 								ui_set_ritem (pfb, ui_grp, 183,	COLOR_GREEN, -1);
+								ErrorBits &= (~ERR_HP_OUT);
 							}
 							if ((event.value == 1) && jack_insert) {
 								jack_insert = 0;
 								ui_set_ritem (pfb, ui_grp, 182,	COLOR_GREEN, -1);
+								ErrorBits &= (~ERR_HP_IN);
 							}
 						break;
 						default :
@@ -786,12 +870,14 @@ int test_spi_button (fb_info_t *pfb, ui_grp_t *ui_grp)
 	if ((state == 0) && (get_efuse_mac(mac_str) == 0)) {
 		state = 1;
 		ui_set_ritem (pfb, ui_grp, 187, COLOR_GREEN, -1);
+		ErrorBits &= (~ERR_SPIBT_DN);
 	}
 
 	/* spi button release */
 	if ((state == 1) && (get_efuse_mac(mac_str) == 1)) {
 		state = 2;
 		ui_set_ritem (pfb, ui_grp, 188, COLOR_GREEN, -1);
+		ErrorBits &= (~ERR_SPIBT_UP);
 	}
 
 	return -1;
@@ -804,7 +890,7 @@ void test_status (fb_info_t *pfb, ui_grp_t *ui_grp, int status)
 	static char blink = 0, timeover = 100;
 
 	/* 1sec update */
-	if (run_interval_check(&t, 1000)) {
+	if (run_interval_check(&t, 1000) || EmergencyStop) {
 		char msg[20];
 		if (timeover == 0)
 			status = eSTATUS_STOP;
@@ -825,6 +911,7 @@ void test_status (fb_info_t *pfb, ui_grp_t *ui_grp, int status)
 			break;
 			case	eSTATUS_FINISH:
 				macaddr_print ();
+				errcode_print ();
 				ui_set_sitem (pfb, ui_grp, 47, -1, -1, "FINISH");
 				ui_set_ritem (pfb, ui_grp, 47, COLOR_GREEN, -1);
 				// Test complete.
@@ -832,6 +919,8 @@ void test_status (fb_info_t *pfb, ui_grp_t *ui_grp, int status)
 			break;
 			default :
 			case	eSTATUS_STOP:
+				macaddr_print ();
+				errcode_print ();
 				ui_set_sitem (pfb, ui_grp, 47, -1, -1, "STOP");
 				ui_set_ritem (pfb, ui_grp, 47, COLOR_RED, -1);
 				// Test complete.
@@ -863,22 +952,29 @@ int main(int argc, char **argv)
 	ui_update(pfb, ui_grp, -1);
 
 	/* test storage, iperf, mac */
-	test_status (pfb, ui_grp, bootup_test(pfb, ui_grp) ? eSTATUS_STOP : eSTATUS_RUNNING);
+	bootup_test(pfb, ui_grp);
+	test_status (pfb, ui_grp, eSTATUS_RUNNING);
 
 	while (1) {
 		/* Test 중인경우 -1, Test 완료의 경우 0 or 1 */
 		/* 각각의 테스트 함수는 static변수를 가지고 있고 테스트 완료시 테스트 skip함. */
 		// usb speed, ir, eth led, headphone jack, spi bt
+		/* IR 강제종료 HOME 키를 받기위하여 계속 실행 */
+		test_ir  = test_ir_ethled  (pfb, ui_grp);
+
 		if (test_usb != 1)	test_usb = test_usb_speed  (pfb, ui_grp);
-		if (test_ir  != 1)	test_ir  = test_ir_ethled  (pfb, ui_grp);
 		if (test_hp  != 1)	test_hp  = test_hp_detect  (pfb, ui_grp);
 		if (test_bt  != 1)	test_bt  = test_spi_button (pfb, ui_grp);
 
-		/* 일정시간 대기시까지 완료가 안되는 경우 강제로 완료 (2 MIN) */
-		if ((test_usb == 1) && (test_ir == 1) && (test_hp == 1) && (test_bt == 1))
-			test_status (pfb, ui_grp, eSTATUS_FINISH);
+		if (!EmergencyStop) {
+			/* 일정시간 대기시까지 완료가 안되는 경우 강제로 완료 (2 MIN) */
+			if ((test_usb == 1) && (test_ir == 1) && (test_hp == 1) && (test_bt == 1))
+				test_status (pfb, ui_grp, eSTATUS_FINISH);
+			else
+				test_status (pfb, ui_grp, eSTATUS_RUNNING);
+		}
 		else
-			test_status (pfb, ui_grp, eSTATUS_RUNNING);
+			test_status (pfb, ui_grp, eSTATUS_STOP);
 
 		/* 100ms loop delay */
 		usleep(100000);
