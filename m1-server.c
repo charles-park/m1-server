@@ -11,10 +11,12 @@
  */
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
+#include <pthread.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <limits.h>
 #include <unistd.h>
 #include <errno.h>
@@ -53,59 +55,82 @@ enum {
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
+/* UI Test ITEM & Result */
+enum {
+	eUI_IPERF_SPEED = 0,
+	eUI_EFUSE_UUIDD,
+	eUI_BOARD_MEM,
+	eUI_FB_SIZE,
+	eUI_EMMC_SPEED,
+	eUI_SATA_SPEED,
+	eUI_NVME_SPEED,
+	eUI_USB30_UP,
+	eUI_USB30_DN,
+	eUI_USB20_UP,
+	eUI_USB20_DN,
+	eUI_ETH_GREEN,
+	eUI_ETH_ORANGE,
+	eUI_HP_IN,
+	eUI_HP_OUT,
+	eUI_SPIBT_DN,
+	eUI_SPIBT_UP,
+	eUI_IR_INPUT,
+	eUI_ITEM_END
+};
+
 #define	TEST_RETRY_COUNT	5
+
+#define	SETBIT_UI_ITEM(x)	(1<x)
+#define	CLRBIT_UI_ITEM(x)  ~(1<x)
+
+#define	RESPONSE_STR_SIZE	32
+#define	ERROR_STR_SIZE		8
 
 char BoardIP    [20] = {0,};
 char NlpServerIP[20] = {0,};
 char MacStr     [20] = {0,};
 char EmergencyStop = 0;
 
-#define	ERR_IPERF_SPEED		(1<<0)
-#define	ERR_EFUSE_UUIDD		(1<<1)
-#define	ERR_BOARD_MEM		(1<<2)
-#define	ERR_FB_SIZE			(1<<3)
-#define	ERR_EMMC_SPEED		(1<<4)
-#define	ERR_SATA_SPEED		(1<<5)
-#define	ERR_NVME_SPEED		(1<<6)
-#define	ERR_USB30_UP		(1<<7)
-#define	ERR_USB30_DN		(1<<8)
-#define	ERR_USB20_UP		(1<<9)
-#define	ERR_USB20_DN		(1<<10)
-#define	ERR_ETH_GREEN		(1<<11)
-#define	ERR_ETH_ORANGE		(1<<12)
-#define	ERR_HP_IN			(1<<13)
-#define	ERR_HP_OUT			(1<<14)
-#define	ERR_SPIBT_DN		(1<<15)
-#define	ERR_SPIBT_UP		(1<<16)
-#define	ERR_IR_INPUT		(1<<17)
-#define	ERR_GET_MACADDR		(1<<18)
+struct m1_item {
+	char		item_id;
+	char		response_str[RESPONSE_STR_SIZE];
+	char		status;
+	char		result;
+	char		ui_id;
+	char		thread_enable;
+	const char	error_str[ERROR_STR_SIZE];
+};
 
-/* default test result error */
-unsigned int ErrorBits = 0x7FFFF;
+struct m1_server {
+	fb_info_t		*pfb;
+	ui_grp_t		*pui;
+	struct m1_item	*items;
+};
 
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-const char	*efuse_uuid_file = "/sys/class/efuse/uuid";
-
-//------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
-const char	*USB_DEVICE_DIR = "/sys/bus/usb/devices";
-const char	*USB_PLATFORM_DIR = "/sys/devices/platform";
-const char	USB_DEVICE_NAME[][4] = {
-	"8-1",	/* usb3.0 port up : detect usb 3.0*/
-	"7-1",	/* usb3.0 port up : detect usb 2.0*/
-	"6-1",	/* usb3.0 port dn : detect usb 3.0*/
-	"5-1",	/* usb3.0 port dn : detect usb 2.0*/
-	"1-1",	/* usb2.0 port up : detect usb 2.0*/
-	"3-1",	/* usb2.0 port dn : detect usb 1.1*/
-	"2-1",	/* usb2.0 port up : detect usb 2.0*/
-	"4-1",	/* usb2.0 port dn : detect usb 1.1*/
+struct m1_item	M1_Items[eUI_ITEM_END] = {
+	{ eUI_IPERF_SPEED, "\0", eSTATUS_WAIT, 0, 147, 0, "IPERF" },
+	{ eUI_EFUSE_UUIDD, "\0", eSTATUS_WAIT, 0, 167, 0, "EFUSE" },
+	{ eUI_BOARD_MEM  , "\0", eSTATUS_WAIT, 0,   8, 0, "MEM" },
+	{ eUI_FB_SIZE    , "\0", eSTATUS_WAIT, 0,  42, 0, "HDMI" },
+	{ eUI_EMMC_SPEED , "\0", eSTATUS_WAIT, 0,  62, 0, "EMMC" },
+	{ eUI_SATA_SPEED , "\0", eSTATUS_WAIT, 0,  82, 0, "SATA" },
+	{ eUI_NVME_SPEED , "\0", eSTATUS_WAIT, 0,  87, 0, "NVME" },
+	{ eUI_USB30_UP   , "\0", eSTATUS_WAIT, 0, 102, 0, "USB3U" },
+	{ eUI_USB30_DN   , "\0", eSTATUS_WAIT, 0, 122, 0, "USB3D" },
+	{ eUI_USB20_UP   , "\0", eSTATUS_WAIT, 0, 107, 0, "USB2U" },
+	{ eUI_USB20_DN   , "\0", eSTATUS_WAIT, 0, 127, 0, "USB2D" },
+	{ eUI_ETH_GREEN  , "\0", eSTATUS_WAIT, 0, 162, 0, "ETH_G" },
+	{ eUI_ETH_ORANGE , "\0", eSTATUS_WAIT, 0, 163, 0, "ETH_O" },
+	{ eUI_HP_IN      , "\0", eSTATUS_WAIT, 0, 182, 0, "HP_I" },
+	{ eUI_HP_OUT     , "\0", eSTATUS_WAIT, 0, 183, 0, "HP_O" },
+	{ eUI_SPIBT_DN   , "\0", eSTATUS_WAIT, 0, 187, 0, "BT_DN" },
+	{ eUI_SPIBT_UP   , "\0", eSTATUS_WAIT, 0, 188, 0, "BT_UP" },
+	{ eUI_IR_INPUT   , "\0", eSTATUS_WAIT, 0, 142, 0, "IR_IN" },
 };
 
 //------------------------------------------------------------------------------
-#define	USB30_MASS_SPEED	60
-#define	USB20_MASS_SPEED	20
-
+//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 const char *OPT_DEVICE_NAME = "/dev/fb0";
@@ -120,30 +145,53 @@ const char *OPT_FBUI_CFG = "fbui.cfg";
 #define	IPERF_SPEED		800
 
 //------------------------------------------------------------------------------
-//------------------------------------------------------------------------------
 // function prototype define
 //------------------------------------------------------------------------------
+int		run_interval_check	(struct timeval *t, double interval_ms);
 int		system_memory		(void);
-int		macaddr_print		(void);
-int 	errcode_print		(void);
+int		change_eth_speed	(int speed);
+void	macaddr_print		(void);
+void 	errcode_print		(void);
 int		get_efuse_mac		(char *mac_str);
 int		write_efuse			(char *uuid);
-int		change_eth_speed	(int speed);
-int		test_efuse_uuid		(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		test_board_mem		(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		test_fb_size		(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		test_emmc_speed		(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		test_sata_speed		(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		test_nvme_speed		(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		test_iperf_speed	(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		test_ir_ethled		(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		test_hp_detect		(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		test_spi_button		(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		test_usb_speed		(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		bootup_test			(fb_info_t *pfb, ui_grp_t *ui_grp);
-int		run_interval_check	(struct timeval *t, double interval_ms);
-void	test_status 		(fb_info_t *pfb, ui_grp_t *ui_grp, int status);
+
+void	*test_board_mem		(void *arg);
+void	*test_emmc_speed	(void *arg);
+void	*test_sata_speed	(void *arg);
+void	*test_nvme_speed	(void *arg);
+void	*test_iperf_speed	(void *arg);
+void	*test_efuse_uuid	(void *arg);
+void	*thread_ui_update 	(void *arg);
+
+void	bootup_test			(fb_info_t *pfb, ui_grp_t *pui);
 int		main				(int argc, char **argv);
+
+//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+int run_interval_check (struct timeval *t, double interval_ms)
+{
+	struct timeval base_time;
+	double difftime;
+
+	gettimeofday(&base_time, NULL);
+
+	if (interval_ms) {
+		/* 현재 시간이 interval시간보다 크면 양수가 나옴 */
+		difftime = (base_time.tv_sec - t->tv_sec) +
+					((base_time.tv_usec - (t->tv_usec + interval_ms * 1000)) / 1000000);
+
+		if (difftime > 0) {
+			t->tv_sec  = base_time.tv_sec;
+			t->tv_usec = base_time.tv_usec;
+			return 1;
+		}
+		return 0;
+	}
+	/* 현재 시간 저장 */
+	t->tv_sec  = base_time.tv_sec;
+	t->tv_usec = base_time.tv_usec;
+	return 1;
+}
 
 //------------------------------------------------------------------------------
 int system_memory (void)
@@ -165,68 +213,102 @@ int system_memory (void)
 }
 
 //------------------------------------------------------------------------------
-int macaddr_print (void)
+// change eth speed -> ethtool used
+// eth speed change cmd (apt install ethtool), speed {100|1000}
+// ethtool -s eth0 speed {speed} duplex full
+// check eth link speed "/sys/class/net/eth0/speed"
+//------------------------------------------------------------------------------
+int change_eth_speed (int speed)
+{
+	FILE *fp;
+	char cmd_line[128], retry = TEST_RETRY_COUNT;
+
+	if (access ("/sys/class/net/eth0/speed", F_OK) != 0)
+		return 0;
+
+	memset (cmd_line, 0x00, sizeof(cmd_line));
+	if ((fp = fopen ("/sys/class/net/eth0/speed", "r")) != NULL) {
+		memset (cmd_line, 0x00, sizeof(cmd_line));
+		if (NULL != fgets (cmd_line, sizeof(cmd_line), fp)) {
+			if (speed == atoi(cmd_line)) {
+				fclose (fp);
+				return -1;
+			}
+		}
+		fclose (fp);
+	}
+	memset (cmd_line, 0x00, sizeof(cmd_line));
+	sprintf(cmd_line,"ethtool -s eth0 speed %d duplex full 2<&1", speed);
+	if ((fp = popen(cmd_line, "w")) != NULL)
+		pclose(fp);
+
+	while (retry) {
+		if ((fp = fopen ("/sys/class/net/eth0/speed", "r")) != NULL) {
+			memset (cmd_line, 0x00, sizeof(cmd_line));
+			if (NULL != fgets (cmd_line, sizeof(cmd_line), fp)) {
+				if (speed == atoi(cmd_line)) {
+					fclose (fp);
+					return 1;
+				}
+				retry--;
+				fprintf (stderr, "%s : change speed = %d, read speed = %d, retry remain = %d\n",
+						__func__, speed, atoi(cmd_line), retry);
+			}
+			fclose (fp);
+		}
+		sleep (1);
+	}
+	return 0;
+}
+
+//------------------------------------------------------------------------------
+void macaddr_print (void)
 {
 	/* mac address print */
-	return nlp_server_write (NlpServerIP, NLP_SERVER_MSG_TYPE_MAC, MacStr, 0);
+	nlp_server_write (NlpServerIP, NLP_SERVER_MSG_TYPE_MAC, MacStr, 0);
 }
 
 //------------------------------------------------------------------------------
-
 //------------------------------------------------------------------------------
-#define PRINT_MAX_STR	50
-int errcode_print (void)
+#define	PRINT_MAX_CHAR	50
+#define	PRINT_MAX_LINE	2
+
+void errcode_print (void)
 {
-	char err_msg[80];
-	int pos = 0;;
+	char err_msg[PRINT_MAX_LINE][PRINT_MAX_CHAR+1];
+	int pos = 0, i, line;
 
-	if (!ErrorBits)
-		return	1;
 	memset (err_msg, 0, sizeof(err_msg));
-	if (ErrorBits & ERR_IPERF_SPEED)	pos += sprintf(&err_msg[pos], "%s,", "IPERF");
-	if (ErrorBits & ERR_EFUSE_UUIDD)	pos += sprintf(&err_msg[pos], "%s,", "EFUSE");
-	if (ErrorBits & ERR_BOARD_MEM)		pos += sprintf(&err_msg[pos], "%s,", "MEM");
-	if (ErrorBits & ERR_FB_SIZE)		pos += sprintf(&err_msg[pos], "%s,", "HDMI");
-	if (ErrorBits & ERR_EMMC_SPEED)		pos += sprintf(&err_msg[pos], "%s,", "EMMC");
-	if (ErrorBits & ERR_SATA_SPEED)		pos += sprintf(&err_msg[pos], "%s,", "SATA");
-	if (ErrorBits & ERR_NVME_SPEED)		pos += sprintf(&err_msg[pos], "%s,", "NVME");
-	if (ErrorBits & ERR_USB30_UP)		pos += sprintf(&err_msg[pos], "%s,", "USB3U");
-	if (ErrorBits & ERR_USB30_DN)		pos += sprintf(&err_msg[pos], "%s,", "USB3D");
-	if (ErrorBits & ERR_USB20_UP)		pos += sprintf(&err_msg[pos], "%s,", "USB2U");
-	if (ErrorBits & ERR_USB20_DN)		pos += sprintf(&err_msg[pos], "%s,", "USB2D");
-	if (ErrorBits & ERR_ETH_GREEN)		pos += sprintf(&err_msg[pos], "%s,", "ETH_G");
-	if (ErrorBits & ERR_ETH_ORANGE)		pos += sprintf(&err_msg[pos], "%s,", "ETH_O");
-	if (ErrorBits & ERR_HP_IN)			pos += sprintf(&err_msg[pos], "%s,", "HP_I");
-	if (ErrorBits & ERR_HP_OUT)			pos += sprintf(&err_msg[pos], "%s,", "HP_O");
-	if (ErrorBits & ERR_SPIBT_DN)		pos += sprintf(&err_msg[pos], "%s,", "BT_DN");
-	if (ErrorBits & ERR_SPIBT_UP)		pos += sprintf(&err_msg[pos], "%s,", "BT_UP");
-	if (ErrorBits & ERR_IR_INPUT)		pos += sprintf(&err_msg[pos], "%s,", "IR_IN");
-	if (ErrorBits & ERR_GET_MACADDR)	pos += sprintf(&err_msg[pos], "%s,", "MACADDR");
 
-	printf ("ErrorBits = 0x%08X, err msg = %s\n", ErrorBits, err_msg);
-	if (pos > PRINT_MAX_STR) {
-		int i = PRINT_MAX_STR;
-		while ((err_msg[i] != ',') && ((int)strlen(err_msg) < i))	i++;
-		nlp_server_write (NlpServerIP, NLP_SERVER_MSG_TYPE_ERR, &err_msg[i+1], 0);
-		printf ("ErrorBits = 0x%08X, err msg = %s\n", ErrorBits, &err_msg[i+1]);
-		err_msg[i+1] = 0;
+	for (i = 0, line = 0; i < eUI_ITEM_END; i++) {
+		if (!M1_Items[i].result) {
+			if ((pos + strlen(M1_Items[i].error_str) + 1) > PRINT_MAX_CHAR) {
+				pos = 0, line++;
+			}
+			pos += sprintf (&err_msg[line][pos], "%s,", M1_Items[i].error_str);
+		}
 	}
-
-	printf ("ErrorBits = 0x%08X, err msg = %s\n", ErrorBits, err_msg);
-	return nlp_server_write (NlpServerIP, NLP_SERVER_MSG_TYPE_ERR, err_msg, 0);
+	if (pos || line) {
+		for (i = 0; i < line+1; i++) {
+			nlp_server_write (NlpServerIP, NLP_SERVER_MSG_TYPE_ERR, &err_msg[i][0], 0);
+			printf ("%s : msg = %s\n", __func__, &err_msg[i][0]);
+		}
+	}
 }
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
+const char	*EFUSE_UUID_FILE = "/sys/class/efuse/uuid";
+
 int get_efuse_mac (char *mac_str)
 {
 	FILE *fp;
 	char cmd_line[128];
 
-	if (access (efuse_uuid_file, F_OK) != 0)
+	if (access (EFUSE_UUID_FILE, F_OK) != 0)
 		return 0;
 
-	if ((fp = fopen(efuse_uuid_file, "r")) != NULL) {
+	if ((fp = fopen(EFUSE_UUID_FILE, "r")) != NULL) {
 		if (fgets (cmd_line, sizeof(cmd_line), fp) != NULL) {
 			char *ptr;
 			int i;
@@ -291,152 +373,115 @@ int write_efuse (char *uuid)
 		}
 		pclose(fp);
 	}
-/* efuse mac offset control */
-#if 0
-	for (offset = 0; offset < 128; offset += 32) {
-		memset (cmd_line, 0x00, sizeof(cmd_line));
-		sprintf(cmd_line,"python3 efuse/efuse_ctl.py -w %s %d", uuid, offset);
-
-		if ((fp = popen(cmd_line, "r")) != NULL) {
-			memset (cmd_line, 0x00, sizeof(cmd_line));
-			while (fgets (cmd_line, sizeof(cmd_line), fp) != NULL) {
-				// msg ("fgets = %s\n", cmd);
-				if (strstr (cmd_line, "efuse write success") != NULL) {
-					pclose (fp);
-					return 1;
-				}
-				memset (cmd_line, 0x00, sizeof(cmd_line));
-			}
-			pclose(fp);
-		}
-		memset (cmd_line, 0x00, sizeof(cmd_line));
-		sprintf(cmd_line,"python3 efuse/efuse_ctl.py -c %d", uuid, offset);
-
-		if ((fp = popen(cmd_line, "r")) != NULL) {
-			memset (cmd_line, 0x00, sizeof(cmd_line));
-			while (fgets (cmd_line, sizeof(cmd_line), fp) != NULL) {
-				// msg ("fgets = %s\n", cmd);
-				if (strstr (cmd_line, "efuse erase success") != NULL) {
-					pclose (fp);
-				}
-				memset (cmd_line, 0x00, sizeof(cmd_line));
-			}
-			pclose(fp);
-		}
-	}
-#endif
 	return 0;
 }
 
 //------------------------------------------------------------------------------
-int test_board_mem (fb_info_t *pfb, ui_grp_t *ui_grp)
+void *test_board_mem (void *arg)
 {
+	struct m1_item *m1 = (struct m1_item *)arg;
 	int mem = system_memory ();
-	char resp_str[32];
 
-	memset (resp_str, 0, sizeof(resp_str));
-	if (mem) {
-		sprintf (resp_str, "%d GB", mem);
-		ui_set_sitem (pfb, ui_grp, 8, -1, -1, resp_str);
-	} else {
-		sprintf (resp_str, "%d GB", mem);
-		ui_set_sitem (pfb, ui_grp, 8, -1, -1, resp_str);
-		ui_set_ritem (pfb, ui_grp, 8, COLOR_RED, -1);
+	m1->status = eSTATUS_RUNNING;
+
+	memset  (m1->response_str, 0x00, RESPONSE_STR_SIZE);
+	sprintf (m1->response_str, "%d GB", mem);
+
+	m1->result = mem ? 1 : 0;
+
+	m1->status = eSTATUS_FINISH;
+	return arg;
+}
+
+//------------------------------------------------------------------------------
+void *test_emmc_speed (void *arg)
+{
+	struct m1_item *m1 = (struct m1_item *)arg;
+	int speed = 0, retry = TEST_RETRY_COUNT;
+
+	m1->status = eSTATUS_RUNNING;
+
+	while ((retry--) && (speed < DEV_SPEED_EMMC)) {
+		memset (m1->response_str, 0x00, RESPONSE_STR_SIZE);
+		speed = storage_test ("emmc", m1->response_str);
 	}
-	return mem ? 1 : 0;
+	m1->result = speed < DEV_SPEED_EMMC ? 0 : 1;
+
+	m1->status = eSTATUS_FINISH;
+	return arg;
 }
 
 //------------------------------------------------------------------------------
-int test_fb_size (fb_info_t *pfb, ui_grp_t *ui_grp)
+void *test_sata_speed (void *arg)
 {
-	char resp_str[32];
+	struct m1_item *m1 = (struct m1_item *)arg;
+	int speed = 0, retry = TEST_RETRY_COUNT;
 
-	memset (resp_str, 0, sizeof(resp_str));
-	sprintf (resp_str, "%d x %d", pfb->w, pfb->h);
-	ui_set_sitem (pfb, ui_grp, 42, -1, -1, resp_str);
+	m1->status = eSTATUS_RUNNING;
 
-	if ((pfb->w != 1920) || (pfb->h != 1080)) {
-		ui_set_ritem (pfb, ui_grp, 42, COLOR_RED, -1);
-		return 0;
-	} else {
-		ui_set_ritem (pfb, ui_grp, 42, COLOR_GREEN, -1);
-		return 1;
+	while ((retry--) && (speed < DEV_SPEED_SATA)) {
+		memset (m1->response_str, 0x00, RESPONSE_STR_SIZE);
+		speed = storage_test ("sata", m1->response_str);
 	}
+	m1->result = speed < DEV_SPEED_SATA ? 0 : 1;
+
+	m1->status = eSTATUS_FINISH;
+	return arg;
 }
 
 //------------------------------------------------------------------------------
-int test_emmc_speed (fb_info_t *pfb, ui_grp_t *ui_grp)
+void *test_nvme_speed (void *arg)
 {
-	char resp_str[32];
+	struct m1_item *m1 = (struct m1_item *)arg;
 	int speed = 0, retry = TEST_RETRY_COUNT;
 
-	memset (resp_str, 0, sizeof(resp_str));
-	while ((retry--) && (speed < DEV_SPEED_EMMC))
-		speed = storage_test ("emmc", resp_str);
+	m1->status = eSTATUS_RUNNING;
 
-	ui_set_sitem (pfb, ui_grp, 62, -1, -1, resp_str);
-	ui_set_ritem (pfb, ui_grp, 62, speed > DEV_SPEED_EMMC ? COLOR_GREEN : COLOR_RED, -1);
-	return retry ? 1 : 0;
+	while ((retry--) && (speed < DEV_SPEED_NVME)) {
+		memset (m1->response_str, 0x00, RESPONSE_STR_SIZE);
+		speed = storage_test ("nvme", m1->response_str);
+	}
+	m1->result = speed < DEV_SPEED_NVME ? 0 : 1;
+
+	m1->status = eSTATUS_FINISH;
+	return arg;
 }
 
 //------------------------------------------------------------------------------
-int test_sata_speed (fb_info_t *pfb, ui_grp_t *ui_grp)
+volatile char IperfTestFlag = 0;
+
+void *test_iperf_speed (void *arg)
 {
-	char resp_str[32];
-	int speed = 0, retry = TEST_RETRY_COUNT;
-
-	memset (resp_str, 0, sizeof(resp_str));
-	while ((retry--) && (speed < DEV_SPEED_SATA))
-		speed = storage_test ("sata", resp_str);
-
-	ui_set_sitem (pfb, ui_grp, 82, -1, -1, resp_str);
-	ui_set_ritem (pfb, ui_grp, 82, speed > DEV_SPEED_SATA ? COLOR_GREEN : COLOR_RED, -1);
-	return retry ? 1 : 0;
-}
-
-//------------------------------------------------------------------------------
-int test_nvme_speed (fb_info_t *pfb, ui_grp_t *ui_grp)
-{
-	char resp_str[32];
-	int speed = 0, retry = TEST_RETRY_COUNT;
-
-	memset (resp_str, 0, sizeof(resp_str));
-	while ((retry--) && (speed < DEV_SPEED_NVME))
-		speed = storage_test ("nvme", resp_str);
-
-	ui_set_sitem (pfb, ui_grp, 87, -1, -1, resp_str);
-	ui_set_ritem (pfb, ui_grp, 87, speed > DEV_SPEED_NVME ? COLOR_GREEN : COLOR_RED, -1);
-	return retry ? 1 : 0;
-}
-
-//------------------------------------------------------------------------------
-int test_iperf_speed (fb_info_t *pfb, ui_grp_t *ui_grp)
-{
-	char resp_str[32];
+	struct m1_item *m1 = (struct m1_item *)arg;
 	int speed = 0, retry = TEST_RETRY_COUNT * 2;
 
+	m1->status = eSTATUS_RUNNING;
+	IperfTestFlag = 1;
 	// UDP = 3, TCP = 4
-	nlp_server_write   (NlpServerIP, 3, "start", 0);
+	nlp_server_write   (NlpServerIP, NLP_SERVER_MSG_TYPE_UDP, "start", 0);
 	sleep(1);
-	memset (resp_str, 0, sizeof(resp_str));
 	while ((retry--) && (speed < IPERF_SPEED)) {
-		speed = iperf3_speed_check (NlpServerIP, 3);
+		speed = iperf3_speed_check (NlpServerIP, NLP_SERVER_MSG_TYPE_UDP);
 		printf ("iperf result : retry = %d, speed = %d Mbits/s\n", retry, speed);
 	}
 	sleep(1);
-	nlp_server_write   (NlpServerIP, 3, "stop", 0);
+	nlp_server_write   (NlpServerIP, NLP_SERVER_MSG_TYPE_UDP, "stop", 0);
 
-	sprintf (resp_str, "%d MBits/sec", speed);
-	ui_set_sitem (pfb, ui_grp, 147, -1, -1, resp_str);
-	ui_set_ritem (pfb, ui_grp, 147, (speed > IPERF_SPEED) ? COLOR_GREEN : COLOR_RED, -1);
+	memset  (m1->response_str, 0x00, RESPONSE_STR_SIZE);
+	sprintf (m1->response_str, "%d MBits/sec", speed);
+	m1->result = speed > IPERF_SPEED ? 1 : 0;
 
-	return retry ? 1 : 0;
+	IperfTestFlag = 0;
+	m1->status = eSTATUS_FINISH;
+	return arg;
 }
 
 //------------------------------------------------------------------------------
-int test_efuse_uuid (fb_info_t *pfb, ui_grp_t *ui_grp)
+void *test_efuse_uuid (void *arg)
 {
-	char resp_str[32];
+	struct m1_item *m1 = (struct m1_item *)arg;
+
+	m1->status = eSTATUS_RUNNING;
 
 	if (!get_efuse_mac (MacStr)) {
 		char uuid[MAC_SERVER_CTRL_TYPE_UUID_SIZE+1];
@@ -456,95 +501,142 @@ int test_efuse_uuid (fb_info_t *pfb, ui_grp_t *ui_grp)
 				printf ("efuse write fail.");
 		}
 	}
+	memset (m1->response_str, 0x00, RESPONSE_STR_SIZE);
 	if (!strncmp (MacStr, "001e06", strlen("001e06"))) {
-		memset (resp_str, 0, sizeof(resp_str));
-		sprintf (resp_str,"00:1e:06:%c%c:%c%c:%c%c",
+		sprintf (m1->response_str,"00:1e:06:%c%c:%c%c:%c%c",
 			MacStr[6],	MacStr[7],	MacStr[8],	MacStr[9],	MacStr[10], MacStr[11]);
-		ui_set_sitem (pfb, ui_grp, 167, -1, -1, resp_str);
-		ui_set_ritem (pfb, ui_grp, 167, COLOR_GREEN, -1);
-		ErrorBits &= (~ERR_GET_MACADDR);
-		return 1;
+		m1->result = 1;
 	} else {
-		ui_set_sitem (pfb, ui_grp, 167, -1, -1, "unknown mac");
-		ui_set_ritem (pfb, ui_grp, 167, COLOR_RED, -1);
-		return 0;
+		sprintf (m1->response_str,"%s", "unknown mac");
+		m1->result = 0;
 	}
+
+	m1->status = eSTATUS_FINISH;
+
+	return arg;
 }
 
 //------------------------------------------------------------------------------
-int bootup_test (fb_info_t *pfb, ui_grp_t *ui_grp)
-{
-	int retry;
-
-	memset (BoardIP, 0, sizeof(BoardIP));
-	memset (NlpServerIP, 0, sizeof(NlpServerIP));
-	memset (MacStr, 0, sizeof(MacStr));
-
-	/* default status */
-	ui_set_sitem (pfb, ui_grp, 47, -1, -1, "WAIT");
-	ui_set_ritem (pfb, ui_grp, 47, COLOR_GRAY, -1);
-
-	/* default network speed GBits/sec */
-	change_eth_speed (1000);
-
-	while (!get_my_ip (BoardIP)) {
-		memset (BoardIP, 0, sizeof(BoardIP));
-		sprintf(BoardIP, "%s", "Network Error!");
-		ui_set_sitem (pfb, ui_grp, 4, -1, -1, BoardIP);
-		ui_set_ritem (pfb, ui_grp, 4, (retry++ % 2)
-			? COLOR_RED : COLOR_DIM_GRAY, -1);
-		sleep(1);
-	}
-	ui_set_sitem (pfb, ui_grp, 4, -1, -1, BoardIP);
-	ui_set_ritem (pfb, ui_grp, 4, COLOR_GREEN, -1);
-
-	while (!nlp_server_find (NlpServerIP)) {
-		memset (NlpServerIP, 0, sizeof(NlpServerIP));
-		sprintf(NlpServerIP, "%s", "Network Error!");
-		ui_set_sitem (pfb, ui_grp, 24, -1, -1, NlpServerIP);
-		ui_set_ritem (pfb, ui_grp, 24, (retry++ % 2)
-			? COLOR_RED : COLOR_DIM_GRAY, -1);
-		sleep(1);
-	}
-	ui_set_sitem (pfb, ui_grp, 24, -1, -1, NlpServerIP);
-	ui_set_ritem (pfb, ui_grp, 24, COLOR_GREEN, -1);
-
-	if (test_iperf_speed(pfb, ui_grp))	ErrorBits &= (~ERR_IPERF_SPEED);
-	if (test_efuse_uuid (pfb, ui_grp))	ErrorBits &= (~ERR_EFUSE_UUIDD);
-	if (test_board_mem  (pfb, ui_grp))	ErrorBits &= (~ERR_BOARD_MEM);
-	if (test_fb_size    (pfb, ui_grp))	ErrorBits &= (~ERR_FB_SIZE);
-	if (test_emmc_speed (pfb, ui_grp))	ErrorBits &= (~ERR_EMMC_SPEED);
-	if (test_sata_speed (pfb, ui_grp))	ErrorBits &= (~ERR_SATA_SPEED);
-	if (test_nvme_speed (pfb, ui_grp))	ErrorBits &= (~ERR_NVME_SPEED);
-	return ErrorBits;
-}
-
+// apt install evetest
+// /dev/input/event2, /sys/class/input/input2/name = ODROID-M1-FRONT Headphones
 //------------------------------------------------------------------------------
-int run_interval_check (struct timeval *t, double interval_ms)
+/* 0 : event none, 1 : insert, 2 : remove */
+volatile char HP_Event = 0;
+
+void *test_hp_detect (void *arg)
 {
-	struct timeval base_time;
-	double difftime;
+	struct m1_item *m1 = (struct m1_item *)arg;
 
-	gettimeofday(&base_time, NULL);
+	memset (m1->response_str, 0x00, sizeof(RESPONSE_STR_SIZE));
 
-	if (interval_ms) {
-		/* 현재 시간이 interval시간보다 크면 양수가 나옴 */
-		difftime = (base_time.tv_sec - t->tv_sec) +
-					((base_time.tv_usec - (t->tv_usec + interval_ms * 1000)) / 1000000);
-
-		if (difftime > 0) {
-			t->tv_sec  = base_time.tv_sec;
-			t->tv_usec = base_time.tv_usec;
-			return 1;
+	while (m1->status != eSTATUS_FINISH) {
+		switch(m1->item_id) {
+			case eUI_HP_IN:
+				if (HP_Event == 1) {
+					m1->result = 1;
+					m1->status = eSTATUS_FINISH;
+				}
+			break;
+			case eUI_HP_OUT:
+				if (HP_Event == 2) {
+					m1->result = 1;
+					m1->status = eSTATUS_FINISH;
+				}
+			break;
 		}
-		return 0;
+		usleep(1000);
 	}
-	/* 현재 시간 저장 */
-	t->tv_sec  = base_time.tv_sec;
-	t->tv_usec = base_time.tv_usec;
-	return 1;
+	return arg;
 }
 
+//------------------------------------------------------------------------------
+// apt install evetest
+// /dev/input/event0, /sys/class/input/input0/name = fdd70030.pwm
+// int change_eth_speed (int speed)
+//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+/* 0 : event none, 1 : event pass */
+volatile char IR_Event = 0;
+
+void *test_ir_input (void *arg)
+{
+	struct m1_item *m1 = (struct m1_item *)arg;
+	while (!IR_Event)	sleep(1);
+
+	memset (m1->response_str, 0x00, sizeof(RESPONSE_STR_SIZE));
+	sprintf (m1->response_str, "%s", "PASS");
+	m1->status = eSTATUS_FINISH;
+	m1->result = 1;
+	return arg;
+}
+
+//------------------------------------------------------------------------------
+/* 0 : event none, 1 : 100Mbps(GREEN) - fail, 2 : 100Mbps(GREEN) - pass */
+/*                 3 : 1Gbps(ORANGE)  - fail, 4 : 1Gbps(ORANGE)  - pass */
+/*                 5 : 100Mbps(GREEN) - run , 6 : 1Gbps(ORANGE)  - run */
+volatile char IR_ETH_Event = 0;
+
+void *test_eth_change (void *arg)
+{
+	struct m1_item *m1 = (struct m1_item *)arg;
+
+	memset (m1->response_str, 0x00, sizeof(RESPONSE_STR_SIZE));
+
+	while (m1->status != eSTATUS_FINISH) {
+		switch(m1->item_id) {
+			case eUI_ETH_GREEN:
+				if (IR_ETH_Event == 5)
+					m1->status = eSTATUS_RUNNING;
+				if ((IR_ETH_Event == 1) || (IR_ETH_Event == 2)) {
+					m1->result = (IR_ETH_Event == 2) ? 1 : 0;
+					m1->status = eSTATUS_FINISH;
+				}
+			break;
+			case eUI_ETH_ORANGE:
+				if (IR_ETH_Event == 6)
+					m1->status = eSTATUS_RUNNING;
+				if ((IR_ETH_Event == 3) || (IR_ETH_Event == 4)) {
+					m1->result = (IR_ETH_Event == 4) ? 1 : 0;
+					m1->status = eSTATUS_FINISH;
+				}
+			break;
+		}
+		usleep(100000);
+	}
+	return arg;
+}
+
+//------------------------------------------------------------------------------
+/* 0 : event none, 1 : BT Press, 2 : BT Release */
+volatile char BT_Event = 0;
+
+void *test_spibt_input (void *arg)
+{
+	struct m1_item *m1 = (struct m1_item *)arg;
+
+	memset (m1->response_str, 0x00, sizeof(RESPONSE_STR_SIZE));
+
+	while (m1->status != eSTATUS_FINISH) {
+		switch(m1->item_id) {
+			case eUI_SPIBT_DN:
+				if (BT_Event == 1) {
+					m1->result = 1;
+					m1->status = eSTATUS_FINISH;
+				}
+			break;
+			case eUI_SPIBT_UP:
+				if (BT_Event == 2) {
+					m1->result = 1;
+					m1->status = eSTATUS_FINISH;
+				}
+			break;
+		}
+		usleep(1000);
+	}
+	return arg;
+}
+
+//------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 /*
 	find /sys/devices/platform -name *sd* | grep 8-1 2<&1
@@ -554,389 +646,475 @@ int run_interval_check (struct timeval *t, double interval_ms)
 	apt install usbutils (lsusb -t...)
 */
 //------------------------------------------------------------------------------
-int test_usb_speed (fb_info_t *pfb, ui_grp_t *ui_grp)
-{
-	static int usb30_up = -1, usb30_dn = -1, usb20_up = -1, usb20_dn = -1, item_cnt, i;
-	static int usb_prev_check = -1;
-	char fname[256];
+/* 0 : event none, 1 : BUSY */
+volatile char USB_Event = 0;
 
-	/* test complete */
-	if ((usb30_up == 1) && (usb30_dn == 1) && (usb20_up == 1) && (usb20_dn == 1))
-		return 1;
+const char	*USB_DEVICE_DIR = "/sys/bus/usb/devices";
+const char	*USB_PLATFORM_DIR = "/sys/devices/platform";
+const char	USB_DEVICE_NAME[][4] = {
+	"8-1",	/* usb3.0 port up : detect usb 3.0*/
+	"7-1",	/* usb3.0 port up : detect usb 2.0*/
+	"6-1",	/* usb3.0 port dn : detect usb 3.0*/
+	"5-1",	/* usb3.0 port dn : detect usb 2.0*/
+	"1-1",	/* usb2.0 port up : detect usb 2.0*/
+	"3-1",	/* usb2.0 port dn : detect usb 1.1*/
+	"2-1",	/* usb2.0 port up : detect usb 2.0*/
+	"4-1",	/* usb2.0 port dn : detect usb 1.1*/
+};
+
+//------------------------------------------------------------------------------
+#define	USB30_MASS_SPEED	60
+#define	USB20_MASS_SPEED	20
+
+//------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
+void *test_usb_speed (void *arg)
+{
+	struct m1_item *m1 = (struct m1_item *)arg;
+	int item_cnt, i, usb_prev_check = -1, usb_detect_cnt;;
+	char fname[256];
 
 	item_cnt = sizeof(USB_DEVICE_NAME) / sizeof(USB_DEVICE_NAME[0]);
 
-	for (i = 0; i < item_cnt; i++) {
-		memset (fname, 0, sizeof(fname));
-		sprintf (fname, "%s/%s", USB_DEVICE_DIR, USB_DEVICE_NAME[i]);
-		if (access (fname, F_OK) == 0) {
-			FILE *fp;
-			int usb_det_speed = 0;
-			/* get detect usb speed */
+	while (!EmergencyStop && (m1->status != eSTATUS_FINISH)) {
+		for (i = 0, usb_detect_cnt = 0; i < item_cnt; i++) {
 			memset (fname, 0, sizeof(fname));
-			sprintf (fname, "%s/%s/speed", USB_DEVICE_DIR, USB_DEVICE_NAME[i]);
-			if ((fp = fopen(fname, "r")) != NULL) {
+			sprintf (fname, "%s/%s", USB_DEVICE_DIR, USB_DEVICE_NAME[i]);
+			if (access (fname, F_OK) == 0) {
+				FILE *fp;
+				int usb_det_speed = 0;
+
+				usb_detect_cnt++;
+				/* get detect usb speed */
 				memset (fname, 0, sizeof(fname));
-				if (fgets (fname, sizeof(fname), fp) != NULL)
-					usb_det_speed = atoi(fname);
-				fclose (fp);
-			}
-			/* find block node for usb mass */
-			memset (fname, 0, sizeof(fname));
-			sprintf (fname, "find %s -name *sd* | grep %s 2<&1",
-					USB_PLATFORM_DIR, USB_DEVICE_NAME[i]);
-
-			 if ((fp = popen(fname, "r")) != NULL) {
-				int speed = -1, ui_id = 0, usb_pass = 0;
-
-				memset (fname, 0x00, sizeof(fname));
-				if (fgets (fname, sizeof(fname), fp) != NULL) {
-					char *str = strstr (fname, "/block/sd"), node = str[9];
-					memset (fname, 0x00, sizeof(fname));
-					sprintf (fname, "/dev/sd%c", node);
-				}
-				pclose (fp);
-				if (strncmp(fname, "/dev/sd", strlen("/dev/sd")))
-					continue;
-
-				if (usb_prev_check == i)
-					continue;
-
-				usb_prev_check = i;
-				switch (i) {
-					case 0:	case 1:
-						ui_id = 102;
-						ui_set_ritem (pfb, ui_grp, 102, COLOR_YELLOW, -1);
-						if (usb_det_speed > 12)
-							speed = storage_read_test (fname, usb_det_speed > 480 ? 5 : 1);
-						usb30_up = (speed > USB30_MASS_SPEED) ? 1 : 0;
-						usb_pass = usb30_up;
-						if (usb30_up)	ErrorBits &= (~ERR_USB30_UP);
-					break;
-					case 2:	case 3:
-						ui_id = 122;
-						ui_set_ritem (pfb, ui_grp, 122, COLOR_YELLOW, -1);
-						if (usb_det_speed > 12)
-							speed = storage_read_test (fname, usb_det_speed > 480 ? 5 : 1);
-						usb30_dn = (speed > USB30_MASS_SPEED) ? 1 : 0;
-						usb_pass = usb30_dn;
-						if (usb30_dn)	ErrorBits &= (~ERR_USB30_DN);
-					break;
-					case 4:	case 5:
-						ui_id = 107;
-						ui_set_ritem (pfb, ui_grp, 107, COLOR_YELLOW, -1);
-						if (usb_det_speed > 12)
-							speed = storage_read_test (fname, usb_det_speed > 12 ? 5 : 1);
-						usb20_up = (speed > USB20_MASS_SPEED) ? 1 : 0;
-						usb_pass = usb20_up;
-						if (usb20_up)	ErrorBits &= (~ERR_USB20_UP);
-					break;
-					case 6:	case 7:
-						ui_id = 127;
-						ui_set_ritem (pfb, ui_grp, 127, COLOR_YELLOW, -1);
-						if (usb_det_speed > 12)
-							speed = storage_read_test (fname, usb_det_speed > 12 ? 5 : 1);
-						usb20_dn = (speed > USB20_MASS_SPEED) ? 1 : 0;
-						usb_pass = usb20_dn;
-						if (usb20_dn)	ErrorBits &= (~ERR_USB20_DN);
-					break;
-					default :
-					break;
-				}
-				if (speed != -1) {
+				sprintf (fname, "%s/%s/speed", USB_DEVICE_DIR, USB_DEVICE_NAME[i]);
+				if ((fp = fopen(fname, "r")) != NULL) {
 					memset (fname, 0, sizeof(fname));
-					sprintf (fname, "%dM - %d MB/s", usb_det_speed, speed);
-					ui_set_sitem (pfb, ui_grp, ui_id, -1, -1, fname);
-					ui_set_ritem (pfb, ui_grp, ui_id, usb_pass ? COLOR_GREEN : COLOR_RED, -1);
-					ui_id = 0;
-				}
-			 }
-		}
-	}
-	if ((usb30_up == -1) || (usb30_dn == -1) || (usb20_up == -1) || (usb20_dn == -1))
-		return -1;
-
-	return	(usb30_up & usb30_dn & usb20_up & usb20_dn);
-}
-
-//------------------------------------------------------------------------------
-// change eth speed -> ethtool used
-// eth speed change cmd (apt install ethtool), speed {100|1000}
-// ethtool -s eth0 speed {speed} duplex full
-// check eth link speed "/sys/class/net/eth0/speed"
-//------------------------------------------------------------------------------
-int change_eth_speed (int speed)
-{
-	FILE *fp;
-	char cmd_line[128], retry = TEST_RETRY_COUNT;
-
-	if (access ("/sys/class/net/eth0/speed", F_OK) != 0)
-		return 0;
-
-	memset (cmd_line, 0x00, sizeof(cmd_line));
-	if ((fp = fopen ("/sys/class/net/eth0/speed", "r")) != NULL) {
-		memset (cmd_line, 0x00, sizeof(cmd_line));
-		if (NULL != fgets (cmd_line, sizeof(cmd_line), fp)) {
-			if (speed == atoi(cmd_line)) {
-				fclose (fp);
-				return -1;
-			}
-		}
-		fclose (fp);
-	}
-	memset (cmd_line, 0x00, sizeof(cmd_line));
-	sprintf(cmd_line,"ethtool -s eth0 speed %d duplex full 2<&1", speed);
-	if ((fp = popen(cmd_line, "w")) != NULL)
-		pclose(fp);
-
-	while (retry) {
-		if ((fp = fopen ("/sys/class/net/eth0/speed", "r")) != NULL) {
-			memset (cmd_line, 0x00, sizeof(cmd_line));
-			if (NULL != fgets (cmd_line, sizeof(cmd_line), fp)) {
-				if (speed == atoi(cmd_line)) {
+					if (fgets (fname, sizeof(fname), fp) != NULL)
+						usb_det_speed = atoi(fname);
 					fclose (fp);
-					return 1;
 				}
-				retry--;
-				fprintf (stderr, "%s : change speed = %d, read speed = %d, retry remain = %d\n",
-						__func__, speed, atoi(cmd_line), retry);
+				/* find block node for usb mass */
+				memset (fname, 0, sizeof(fname));
+				sprintf (fname, "find %s -name *sd* | grep %s 2<&1",
+						USB_PLATFORM_DIR, USB_DEVICE_NAME[i]);
+
+				if ((fp = popen(fname, "r")) != NULL) {
+					int speed = -1;
+
+					memset (fname, 0x00, sizeof(fname));
+					if (fgets (fname, sizeof(fname), fp) != NULL) {
+						char *str = strstr (fname, "/block/sd"), node = str[9];
+						memset (fname, 0x00, sizeof(fname));
+						sprintf (fname, "/dev/sd%c", node);
+					}
+					pclose (fp);
+					if (strncmp(fname, "/dev/sd", strlen("/dev/sd")))
+						continue;
+
+					if (usb_prev_check == i)
+						continue;
+
+					usb_prev_check = i;
+					switch (i) {
+						case 0:	case 1:
+							if (m1->item_id == eUI_USB30_UP) {
+								m1->status = eSTATUS_RUNNING;
+								if (usb_det_speed > 12)
+									speed = storage_read_test (fname, usb_det_speed > 480 ? 5 : 1);
+								m1->result = (speed > USB30_MASS_SPEED) ? 1 : 0;
+								m1->status = m1->result ? eSTATUS_FINISH : eSTATUS_STOP;
+								if (speed != -1) {
+									memset  (m1->response_str, 0x00, RESPONSE_STR_SIZE);
+									sprintf (m1->response_str, "%dM - %d MB/s", usb_det_speed, speed);
+								}
+							}
+						break;
+						case 2:	case 3:
+							if (m1->item_id == eUI_USB30_DN) {
+								m1->status = eSTATUS_RUNNING;
+								if (usb_det_speed > 12)
+									speed = storage_read_test (fname, usb_det_speed > 480 ? 5 : 1);
+								m1->result = (speed > USB30_MASS_SPEED) ? 1 : 0;
+								m1->status = m1->result ? eSTATUS_FINISH : eSTATUS_STOP;
+								if (speed != -1) {
+									memset  (m1->response_str, 0x00, RESPONSE_STR_SIZE);
+									sprintf (m1->response_str, "%dM - %d MB/s", usb_det_speed, speed);
+								}
+							}
+						break;
+						case 4:	case 5:
+							if (m1->item_id == eUI_USB20_UP) {
+								m1->status = eSTATUS_RUNNING;
+								if (usb_det_speed > 12)
+									speed = storage_read_test (fname, usb_det_speed > 12 ? 5 : 1);
+								m1->result = (speed > USB20_MASS_SPEED) ? 1 : 0;
+								m1->status = m1->result ? eSTATUS_FINISH : eSTATUS_STOP;
+								if (speed != -1) {
+									memset  (m1->response_str, 0x00, RESPONSE_STR_SIZE);
+									sprintf (m1->response_str, "%dM - %d MB/s", usb_det_speed, speed);
+								}
+							}
+						break;
+						case 6:	case 7:
+							if (m1->item_id == eUI_USB20_DN) {
+								m1->status = eSTATUS_RUNNING;
+								if (usb_det_speed > 12)
+									speed = storage_read_test (fname, usb_det_speed > 12 ? 5 : 1);
+								m1->result = (speed > USB20_MASS_SPEED) ? 1 : 0;
+								m1->status = m1->result ? eSTATUS_FINISH : eSTATUS_STOP;
+								if (speed != -1) {
+									memset  (m1->response_str, 0x00, RESPONSE_STR_SIZE);
+									sprintf (m1->response_str, "%dM - %d MB/s", usb_det_speed, speed);
+								}
+							}
+						break;
+						default :
+						break;
+					}
+				}
 			}
-			fclose (fp);
 		}
-		sleep (1);
+		// remove all usb port
+		if (!usb_detect_cnt)
+			usb_prev_check = -1;
+		usleep(1000);
 	}
-	return 0;
+	return	arg;
 }
 
 //------------------------------------------------------------------------------
-// apt install evetest
-// /dev/input/event0, /sys/class/input/input0/name = fdd70030.pwm
-// int change_eth_speed (int speed)
 //------------------------------------------------------------------------------
-int test_ir_ethled (fb_info_t *pfb, ui_grp_t *ui_grp)
+#define	TIMEOVER_COUNT	90
+
+void *thread_ui_update (void *arg)
 {
-	static int fd = -1, led_orange = 1, led_green = 1;
+	struct m1_server *m1_server = (struct m1_server *)arg;
+	int i, timeover = TIMEOVER_COUNT, fin_cnt, loop_cnt = 0;;
+
+	/* default status */
+	ui_set_sitem (m1_server->pfb, m1_server->pui, 47, -1, -1, "WAIT");
+	ui_set_ritem (m1_server->pfb, m1_server->pui, 47, COLOR_GRAY, -1);
+
+	while (!EmergencyStop && timeover) {
+		for (i = 0, fin_cnt = 0; i < eUI_ITEM_END; i++) {
+			if (m1_server->items[i].status != eSTATUS_WAIT) {
+				switch (m1_server->items[i].status) {
+					case eSTATUS_RUNNING:
+						ui_set_ritem (m1_server->pfb, m1_server->pui,
+							m1_server->items[i].ui_id, COLOR_YELLOW, -1);
+					break;
+					case eSTATUS_STOP:
+					case eSTATUS_FINISH:
+						ui_set_ritem (m1_server->pfb, m1_server->pui,
+							m1_server->items[i].ui_id,
+							m1_server->items[i].result ? COLOR_GREEN : COLOR_RED, -1);
+						if (m1_server->items[i].response_str[0] != 0) {
+							ui_set_sitem (m1_server->pfb, m1_server->pui,
+								m1_server->items[i].ui_id, -1, -1,
+								m1_server->items[i].response_str);
+						}
+					break;
+				}
+			}
+			if (m1_server->items[i].status == eSTATUS_FINISH)
+				fin_cnt++;
+		}
+
+		if (fin_cnt) {
+			if (fin_cnt == eUI_ITEM_END) {
+				int error_cnt;
+				for (i = 0, error_cnt = 0; i < eUI_ITEM_END; i++) {
+					if (!m1_server->items[i].result) {
+						error_cnt++;
+						printf ("%s : item err = %s\n", __func__, m1_server->items[i].error_str);
+					}
+				}
+				ui_set_sitem (m1_server->pfb, m1_server->pui, 47, -1, -1, "FINISH");
+				ui_set_ritem (m1_server->pfb, m1_server->pui, 47,
+										error_cnt ? COLOR_RED : COLOR_GREEN, -1);
+				break;
+			} else {
+				char status_msg[32];
+				memset  (status_msg, 0x00, sizeof(status_msg));
+				sprintf (status_msg, "RUNNING - %d", timeover);
+				ui_set_sitem (m1_server->pfb, m1_server->pui, 47, -1, -1, status_msg);
+				ui_set_ritem (m1_server->pfb, m1_server->pui, 47,
+					((loop_cnt % 2) == 0) ? RUN_BOX_ON : RUN_BOX_OFF, -1);
+				ui_update (m1_server->pfb, m1_server->pui, -1);
+			}
+		}
+		if ((loop_cnt++ % 2) == 0)
+			timeover--;
+
+		usleep(500000);
+	}
+
+	macaddr_print ();	errcode_print ();
+
+	if (EmergencyStop || !timeover) {
+		ui_set_sitem (m1_server->pfb, m1_server->pui, 47, -1, -1, "STOP");
+		ui_set_ritem (m1_server->pfb, m1_server->pui, 47, COLOR_RED, -1);
+	}
+
+	while (1) {
+		EmergencyStop = 1;
+		fprintf(stdout, "%s finish...\n", __func__);
+		fflush (stdout);
+		sleep(1);
+		ui_update (m1_server->pfb, m1_server->pui, -1);
+	}
+	return arg;
+}
+
+//------------------------------------------------------------------------------
+void bootup_test (fb_info_t *pfb, ui_grp_t *pui)
+{
+	int retry;
+
+	memset (BoardIP, 0, sizeof(BoardIP));
+	memset (NlpServerIP, 0, sizeof(NlpServerIP));
+	memset (MacStr, 0, sizeof(MacStr));
+
+	/* default network speed GBits/sec */
+	change_eth_speed (1000);
+
+	while (!get_my_ip (BoardIP)) {
+		memset (BoardIP, 0, sizeof(BoardIP));
+		sprintf(BoardIP, "%s", "Network Error!");
+		ui_set_sitem (pfb, pui, 4, -1, -1, BoardIP);
+		ui_set_ritem (pfb, pui, 4, (retry++ % 2)
+			? COLOR_RED : COLOR_DIM_GRAY, -1);
+		sleep(1);
+	}
+	ui_set_sitem (pfb, pui, 4, -1, -1, BoardIP);
+	ui_set_ritem (pfb, pui, 4, COLOR_GREEN, -1);
+
+	while (!nlp_server_find (NlpServerIP)) {
+		memset (NlpServerIP, 0, sizeof(NlpServerIP));
+		sprintf(NlpServerIP, "%s", "Network Error!");
+		ui_set_sitem (pfb, pui, 24, -1, -1, NlpServerIP);
+		ui_set_ritem (pfb, pui, 24, (retry++ % 2)
+			? COLOR_RED : COLOR_DIM_GRAY, -1);
+		sleep(1);
+	}
+	ui_set_sitem (pfb, pui, 24, -1, -1, NlpServerIP);
+	ui_set_ritem (pfb, pui, 24, COLOR_GREEN, -1);
+
+	// thread run
+	M1_Items[eUI_FB_SIZE].status = eSTATUS_RUNNING;
+	memset  (M1_Items[eUI_FB_SIZE].response_str, 0x00, RESPONSE_STR_SIZE);
+	sprintf (M1_Items[eUI_FB_SIZE].response_str, "%d x %d", pfb->w, pfb->h);
+	if ((pfb->w != 1920) || (pfb->h != 1080))
+		M1_Items[eUI_FB_SIZE].result = 0;
+	else
+		M1_Items[eUI_FB_SIZE].result = 1;
+	M1_Items[eUI_FB_SIZE].status = eSTATUS_FINISH;
+
+}
+
+//------------------------------------------------------------------------------
+void test_thread_run (void)
+{
+	pthread_t thread_iperf, thread_efuse;
+	pthread_t thread_board_mem, thread_emmc, thread_sata, thread_nvme;
+	pthread_t thread_hp_in, thread_hp_out, thread_ir_input;
+	pthread_t thread_eth_green, thread_eth_orange;
+	pthread_t thread_spibt_up, thread_spibt_dn;
+	pthread_t thread_usb30_up, thread_usb30_dn, thread_usb20_up, thread_usb20_dn;
+
+	pthread_create (&thread_efuse, NULL, test_efuse_uuid,  &M1_Items[eUI_EFUSE_UUIDD]);
+	pthread_create (&thread_iperf, NULL, test_iperf_speed, &M1_Items[eUI_IPERF_SPEED]);
+
+	pthread_create (&thread_board_mem, NULL, test_board_mem,  &M1_Items[eUI_BOARD_MEM]);
+	pthread_create (&thread_emmc, NULL, test_emmc_speed, &M1_Items[eUI_EMMC_SPEED]);
+	pthread_create (&thread_sata, NULL, test_sata_speed, &M1_Items[eUI_SATA_SPEED]);
+	pthread_create (&thread_nvme, NULL, test_nvme_speed, &M1_Items[eUI_NVME_SPEED]);
+
+	pthread_create (&thread_hp_in,  NULL, test_hp_detect, &M1_Items[eUI_HP_IN]);
+	pthread_create (&thread_hp_out, NULL, test_hp_detect, &M1_Items[eUI_HP_OUT]);
+
+	pthread_create (&thread_ir_input, NULL, test_ir_input, &M1_Items[eUI_IR_INPUT]);
+
+	pthread_create (&thread_eth_green,  NULL, test_eth_change, &M1_Items[eUI_ETH_GREEN]);
+	pthread_create (&thread_eth_orange, NULL, test_eth_change, &M1_Items[eUI_ETH_ORANGE]);
+
+	pthread_create (&thread_spibt_up, NULL, test_spibt_input, &M1_Items[eUI_SPIBT_UP]);
+	pthread_create (&thread_spibt_dn, NULL, test_spibt_input, &M1_Items[eUI_SPIBT_DN]);
+
+	pthread_create (&thread_usb30_up, NULL, test_usb_speed, &M1_Items[eUI_USB30_UP]);
+	pthread_create (&thread_usb30_dn, NULL, test_usb_speed, &M1_Items[eUI_USB30_DN]);
+	pthread_create (&thread_usb20_up, NULL, test_usb_speed, &M1_Items[eUI_USB20_UP]);
+	pthread_create (&thread_usb20_dn, NULL, test_usb_speed, &M1_Items[eUI_USB20_DN]);
+
+	#if 0
+	test_iperf_speed (&M1_Items[eUI_IPERF_SPEED]);
+	#endif
+}
+
+//------------------------------------------------------------------------------
+void *thread_ir_event (void *arg)
+{
 	struct input_event event;
 
 	struct timeval  timeout;
 	fd_set readFds;
+	static int fd = -1, green_test = 0, orange_test = 0;
 
-	// recive time out config
-	// Set 1ms timeout counter
-	timeout.tv_sec  = 0;
-	// timeout.tv_usec = timeout_ms*1000;
-	timeout.tv_usec = 100000;
-
-	if (fd == -1) {
-		fd = open ("/dev/input/event0", O_RDONLY);
-		printf("%s fd = %d\n", __func__, fd);
+	if ((fd = open("/dev/input/event0", O_RDONLY)) < 0) {
+		printf ("%s : /dev/input/event0 open error!\n", __func__);
+		return arg;
 	}
-    FD_ZERO(&readFds);
-    FD_SET(fd, &readFds);
-    select(fd+1, &readFds, NULL, NULL, &timeout);
+	printf("%s fd = %d\n", __func__, fd);
 
-    if(FD_ISSET(fd, &readFds))
-    {
-		if(fd && read(fd, &event, sizeof(struct input_event))) {
-			int changed = 0;
-			switch (event.type) {
-				case	EV_SYN:
-					break;
-				case	EV_KEY:
-					switch (event.code) {
-						/* emergency stop */
-						case	KEY_HOME:
-							EmergencyStop = 1;
+	while (!EmergencyStop) {
+		// recive time out config
+		// Set 1ms timeout counter
+		timeout.tv_sec  = 0;
+		// timeout.tv_usec = timeout_ms*1000;
+		timeout.tv_usec = 100000;
+
+		FD_ZERO(&readFds);
+		FD_SET(fd, &readFds);
+		select(fd+1, &readFds, NULL, NULL, &timeout);
+
+		if(FD_ISSET(fd, &readFds))
+		{
+			if(fd && read(fd, &event, sizeof(struct input_event))) {
+				int changed = -1;
+				switch (event.type) {
+					case	EV_SYN:
 						break;
-						case	KEY_ENTER:	case	KEY_UP:
-						case	KEY_LEFT:	case	KEY_RIGHT:	case	KEY_DOWN:
-						case	KEY_MUTE:	case	KEY_MENU:	case	KEY_BACK:
-						case	KEY_VOLUMEDOWN:		case	KEY_VOLUMEUP:
-						case	KEY_POWER:	case	0:
-							printf("event.type = %d, event.code = %d, event.value = %d\n",
-								event.type, event.code, event.value);
-							if ((event.code == KEY_VOLUMEDOWN) && event.value && led_green) {
-								led_green = 0;
-								ui_set_ritem (pfb, ui_grp, 162, COLOR_YELLOW, -1);
-								if ((changed = change_eth_speed (100)) != -1) {
-									ui_set_ritem (pfb, ui_grp, 162,
-												changed ? COLOR_GREEN : COLOR_RED, -1);
-									if (changed)	ErrorBits &= (~ERR_ETH_GREEN);
+					case	EV_KEY:
+						IR_Event = 1;
+						switch (event.code) {
+							/* emergency stop */
+							case	KEY_HOME:
+								EmergencyStop = 1;
+								printf ("%s : EmergencyStop!!\n", __func__);
+							break;
+							case	KEY_VOLUMEDOWN:
+								if (green_test || IperfTestFlag)
+									break;
+								IR_ETH_Event = 5;
+								if ((changed = change_eth_speed(100)) != -1) {
+									green_test = 1;
+									IR_ETH_Event = changed ? 2 : 1;
 								}
-							}
-							if ((event.code == KEY_VOLUMEUP) && event.value && led_orange && !led_green) {
-								led_orange = 0;
-								ui_set_ritem (pfb, ui_grp, 163, COLOR_YELLOW, -1);
-								if ((changed = change_eth_speed (1000)) != -1) {
-									ui_set_ritem (pfb, ui_grp, 163,
-												changed ? COLOR_GREEN : COLOR_RED, -1);
-									if (changed)	ErrorBits &= (~ERR_ETH_ORANGE);
+							break;
+							case	KEY_VOLUMEUP:
+								if (!green_test || orange_test || IperfTestFlag)
+									break;
+								IR_ETH_Event = 6;
+								if ((changed = change_eth_speed(1000)) != -1) {
+									orange_test = 1;
+									IR_ETH_Event = changed ? 4 : 3;
 								}
-							}
-							ui_set_sitem (pfb, ui_grp, 142,	-1, -1, "PASS");
-							ui_set_ritem (pfb, ui_grp, 142,	COLOR_GREEN, -1);
-							ErrorBits &= (~ERR_IR_INPUT);
+							break;
+							default :
+							break;
+						}
 						break;
-						default :
-							printf("unknown event\n");
+					default	:
+						IR_Event = 0;
+						printf("unknown event\n");
 						break;
-					}
-					break;
-				default	:
-					break;
+				}
 			}
 		}
-    }
-	/* Test complete */
-	if (!led_orange && !led_green)
-		return 1;
-
-	return -1;
+		usleep(100000);
+	}
+	return arg;
 }
 
 //------------------------------------------------------------------------------
-// apt install evetest
-// /dev/input/event2, /sys/class/input/input2/name = ODROID-M1-FRONT Headphones
-//------------------------------------------------------------------------------
-int test_hp_detect (fb_info_t *pfb, ui_grp_t *ui_grp)
+void *thread_hp_event (void *arg)
 {
-	static int fd = -1, jack_insert = 1, jack_remove = 1;
 	struct input_event event;
-
 	struct timeval  timeout;
 	fd_set readFds;
+	int fd;
 
-	/* Test complete */
-	if (!jack_insert && !jack_remove)
-		return 1;
-
-	// recive time out config
-	// Set 1ms timeout counter
-	timeout.tv_sec  = 0;
-	// timeout.tv_usec = timeout_ms*1000;
-	timeout.tv_usec = 100000;
-
-	if (fd == -1) {
-		fd = open ("/dev/input/event2", O_RDONLY);
-		printf("%s fd = %d\n", __func__, fd);
+	if ((fd = open("/dev/input/event2", O_RDONLY)) < 0) {
+		printf ("%s : /dev/input/event2 open error!\n", __func__);
+		return arg;
 	}
-    FD_ZERO(&readFds);
-    FD_SET(fd, &readFds);
-    select(fd+1, &readFds, NULL, NULL, &timeout);
+	printf("%s fd = %d\n", __func__, fd);
 
-    if(FD_ISSET(fd, &readFds)) {
-		if(fd && read(fd, &event, sizeof(struct input_event))) {
-			switch (event.type) {
-				case	EV_SYN:
-					break;
-				case	EV_SW:
-					switch (event.code) {
-						case	SW_HEADPHONE_INSERT:
-							if ((event.value == 0) && jack_remove) {
-								jack_remove = 0;
-								ui_set_ritem (pfb, ui_grp, 183,	COLOR_GREEN, -1);
-								ErrorBits &= (~ERR_HP_OUT);
-							}
-							if ((event.value == 1) && jack_insert) {
-								jack_insert = 0;
-								ui_set_ritem (pfb, ui_grp, 182,	COLOR_GREEN, -1);
-								ErrorBits &= (~ERR_HP_IN);
-							}
+	while (!EmergencyStop) {
+		// recive time out config
+		// Set 1ms timeout counter
+		timeout.tv_sec  = 0;
+		// timeout.tv_usec = timeout_ms*1000;
+		timeout.tv_usec = 100000;
+
+		FD_ZERO(&readFds);
+		FD_SET(fd, &readFds);
+		select(fd+1, &readFds, NULL, NULL, &timeout);
+
+		if(FD_ISSET(fd, &readFds)) {
+			if(fd && read(fd, &event, sizeof(struct input_event))) {
+				switch (event.type) {
+					case	EV_SYN:
 						break;
-						default :
-							printf("unknown event\n");
+					case	EV_SW:
+						switch (event.code) {
+							case	SW_HEADPHONE_INSERT:
+								HP_Event = event.value ? 1 : 2;
+							break;
+							default :
+								HP_Event = 0;
+							break;
+						}
 						break;
-					}
-					break;
-				default	:
-					break;
+					default	:
+						break;
+				}
 			}
 		}
-    }
-	return -1;
+		usleep(1000);
+	}
+	return arg;
 }
 
 //------------------------------------------------------------------------------
-int test_spi_button (fb_info_t *pfb, ui_grp_t *ui_grp)
+void *thread_bt_event (void *arg)
 {
 	char mac_str[20];
-	static int state = 0;
 
-	/* test complete */
-	if (state == 2)
-		return 1;
+	/* state 0 : press wait, state 1 : release wait*/
+	int bt_state = 0;
 
-	/* spi button press */
-	if ((state == 0) && (get_efuse_mac(mac_str) == 0)) {
-		state = 1;
-		ui_set_ritem (pfb, ui_grp, 187, COLOR_GREEN, -1);
-		ErrorBits &= (~ERR_SPIBT_DN);
-	}
-
-	/* spi button release */
-	if ((state == 1) && (get_efuse_mac(mac_str) == 1)) {
-		state = 2;
-		ui_set_ritem (pfb, ui_grp, 188, COLOR_GREEN, -1);
-		ErrorBits &= (~ERR_SPIBT_UP);
-	}
-
-	return -1;
-}
-
-//------------------------------------------------------------------------------
-void test_status (fb_info_t *pfb, ui_grp_t *ui_grp, int status)
-{
-	static struct timeval t;
-	static char blink = 0, timeover = 100;
-
-	/* 1sec update */
-	if (run_interval_check(&t, 1000) || EmergencyStop) {
-		char msg[20];
-		if (timeover == 0)
-			status = eSTATUS_STOP;
-		else
-			timeover--;
-		/* system state display "wait" */
-		switch (status) {
-			case	eSTATUS_WAIT:
-				ui_set_sitem (pfb, ui_grp, 47, -1, -1, "WAIT");
-				ui_set_ritem (pfb, ui_grp, 47, COLOR_GRAY, -1);
+	while (!EmergencyStop && (bt_state != 2)) {
+		switch (bt_state) {
+			case	0:
+				// key_press wait
+				if(get_efuse_mac(mac_str) == 0) {
+					bt_state = 1;	BT_Event = 1;
+				}
 			break;
-			case	eSTATUS_RUNNING:
-				blink = !blink;
-				memset (msg, 0, sizeof(msg));
-				sprintf (msg, "RUNNING - %d", timeover);
-				ui_set_sitem (pfb, ui_grp, 47, -1, -1, msg);
-				ui_set_ritem (pfb, ui_grp, 47, blink ? RUN_BOX_ON : RUN_BOX_OFF, -1);
+			case	1:
+				// key_release wait
+				if(get_efuse_mac(mac_str) == 1) {
+					bt_state = 2;	BT_Event = 2;
+				}
 			break;
-			case	eSTATUS_FINISH:
-				macaddr_print ();
-				errcode_print ();
-				ui_set_sitem (pfb, ui_grp, 47, -1, -1, "FINISH");
-				ui_set_ritem (pfb, ui_grp, 47, COLOR_GREEN, -1);
-				// Test complete.
-				while (1)	sleep(1);
-			break;
-			default :
-			case	eSTATUS_STOP:
-				macaddr_print ();
-				errcode_print ();
-				ui_set_sitem (pfb, ui_grp, 47, -1, -1, "STOP");
-				ui_set_ritem (pfb, ui_grp, 47, COLOR_RED, -1);
-				// Test complete.
-				while (1)	sleep(1);
+			default	:
 			break;
 		}
-		ui_update (pfb, ui_grp, -1);
+		usleep(200000);
 	}
+	return arg;
 }
 
 //------------------------------------------------------------------------------
 int main(int argc, char **argv)
 {
+	pthread_t ui_thread, ir_thread, hp_thread, bt_thread;
+
+	struct m1_server m1_server;
 	fb_info_t	*pfb;
-	ui_grp_t 	*ui_grp;
-	int			test_usb = 0, test_ir = 0, test_hp = 0, test_bt = 0;
+	ui_grp_t 	*pui;
 
 	if ((pfb = fb_init (OPT_DEVICE_NAME)) == NULL) {
 		fprintf(stdout, "ERROR: frame buffer init fail!\n");
@@ -944,42 +1122,33 @@ int main(int argc, char **argv)
 	}
     fb_cursor (0);
 
-	if ((ui_grp = ui_init (pfb, OPT_FBUI_CFG)) == NULL) {
+	if ((pui = ui_init (pfb, OPT_FBUI_CFG)) == NULL) {
 		fprintf(stdout, "ERROR: User interface create fail!\n");
 		exit(1);
 	}
-	/* UI Init string */
-	ui_update(pfb, ui_grp, -1);
+	ui_update(pfb, pui, -1);
 
-	/* test storage, iperf, mac */
-	bootup_test(pfb, ui_grp);
-	test_status (pfb, ui_grp, eSTATUS_RUNNING);
+	m1_server.items = &M1_Items[0];
+	m1_server.pfb   = pfb;
+	m1_server.pui   = pui;
 
-	while (1) {
-		/* Test 중인경우 -1, Test 완료의 경우 0 or 1 */
-		/* 각각의 테스트 함수는 static변수를 가지고 있고 테스트 완료시 테스트 skip함. */
-		// usb speed, ir, eth led, headphone jack, spi bt
-		/* IR 강제종료 HOME 키를 받기위하여 계속 실행 */
-		test_ir  = test_ir_ethled  (pfb, ui_grp);
+	/* UI Thread running */
+	pthread_create(&ui_thread, NULL, thread_ui_update, &m1_server);
+	bootup_test(pfb, pui);
 
-		if (test_usb != 1)	test_usb = test_usb_speed  (pfb, ui_grp);
-		if (test_hp  != 1)	test_hp  = test_hp_detect  (pfb, ui_grp);
-		if (test_bt  != 1)	test_bt  = test_spi_button (pfb, ui_grp);
+	/* IR Thread running */
+	pthread_create(&ir_thread, NULL, thread_ir_event, &m1_server);
+	/* HP Thread running */
+	pthread_create(&hp_thread, NULL, thread_hp_event, &m1_server);
+	/* SPI Button Thread rinning */
+	pthread_create(&bt_thread, NULL, thread_bt_event, &m1_server);
 
-		if (!EmergencyStop) {
-			/* 일정시간 대기시까지 완료가 안되는 경우 강제로 완료 (2 MIN) */
-			if ((test_usb == 1) && (test_ir == 1) && (test_hp == 1) && (test_bt == 1))
-				test_status (pfb, ui_grp, eSTATUS_FINISH);
-			else
-				test_status (pfb, ui_grp, eSTATUS_RUNNING);
-		}
-		else
-			test_status (pfb, ui_grp, eSTATUS_STOP);
+	test_thread_run ();
 
-		/* 100ms loop delay */
-		usleep(100000);
-	}
-	ui_close(ui_grp);
+	while (1)
+		sleep(1);
+
+	ui_close(pui);
 	fb_close (pfb);
 
 	return 0;
