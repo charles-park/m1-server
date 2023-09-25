@@ -77,7 +77,7 @@ Simple mixer control 'Capture MIC Path',0
 ### Use the lib_fbui submodule.
 * Add the lib fbui submodule to the m1-server repository.
 ```
-root@odroid:~/m1-server# git add submodule https://github.com/charles-park/lib_fbui
+root@odroid:~/m1-server# git submodule add https://github.com/charles-park/lib_fbui
 Cloning into '/root/m1-server/lib_fbui'...
 remote: Enumerating objects: 20, done.
 remote: Counting objects: 100% (20/20), done.
